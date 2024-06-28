@@ -1,0 +1,614 @@
+library(tidyverse)
+library(sf)
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+library(scales)
+library(lubridate)
+library(plotly)
+
+#### EPI DATA ####
+########################## EPI DATA ###########################################
+
+#Create a table with every week per region
+WHO_epi_data <-read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Epi_Data/WHO_GADM_Districts_Transform.csv")
+
+WHO_epi_data$NAME_2 <- as.character(WHO_epi_data$NAME_2)
+angola_districts$NAME_2 <- as.character( angola_districts$NAME_2)
+
+NAME_2<-unique(angola_districts$NAME_2)
+weeks <- as.character(c(13:52, 1:52, 1:52, 1:13))
+years <- c(rep(2022, 39), rep(2023, 52), rep(2024, 13))
+
+all_combinations <- expand.grid(NAME_2 = NAME_2, Week = weeks, Year = years, stringsAsFactors = FALSE)
+
+full_data <- merge(all_combinations, WHO_epi_data, by = c("NAME_2", "Week", "Year"), all.x = TRUE)
+
+full_data$Cases[is.na(full_data$Cases)] <- 0
+full_data$Deaths[is.na(full_data$Deaths)] <- 0
+
+if(any(duplicated(full_data))) {
+  full_data <- full_data[!duplicated(full_data), ]
+}
+
+#Seasonal variation of cases
+head(full_data)
+
+weekly_cases_by_year <- full_data %>%
+  group_by(Year, Week) %>%
+  summarise(
+    Total_Cases = sum(Cases, na.rm = TRUE),
+    Total_Deaths = sum(Deaths, na.rm = TRUE),
+    .groups = 'drop'
+  ) %>%
+  mutate(
+    Total_Cases = replace_na(Total_Cases, 0),
+    Total_Deaths = replace_na(Total_Deaths, 0),
+    Year = as.numeric(Year),
+    Week = as.numeric(Week),
+    Continuous_Week = (Year - min(Year)) * 52 + Week,  # This assumes all years have exactly 52 weeks
+    CFR = ifelse(Total_Cases == 0, 0, (Total_Deaths / Total_Cases) * 100)  # Calculate Case Fatality Rate, set CFR to 0 if Total_Cases is 0
+  ) %>%
+  arrange(Year, Week)
+
+weekly_cases_by_year <- weekly_cases_by_year %>%
+  mutate(
+    CFR = replace_na(CFR, 0),
+    CFR = ifelse(is.infinite(CFR) | is.nan(CFR), 0, CFR)
+  )
+
+
+#With trend lines
+ggplot(weekly_cases_by_year, aes(x = as.numeric(Week), y = Total_Cases, color = as.factor(Year))) +
+  geom_line(alpha = 0.5) +  # Make the actual lines a bit transparent to focus on trends
+  geom_smooth(se = FALSE, method = "loess", span = 0.2) +  # Add LOESS smooth trend line, adjust 'span' for smoothness
+  labs(title = "Total Meningitis Cases Per Week by Year with Trend Lines",
+       x = "Week of the Year",
+       y = "Total Cases",
+       color = "Year") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+#Without trend lines
+ggplot(weekly_cases_by_year, aes(x = as.numeric(Week), y = Total_Cases, color = as.factor(Year))) +
+  geom_line(alpha = 1) +  # Make the actual lines a bit transparent to focus on trends
+  labs(title = "Total Meningitis Cases Per Week by Year with Trend Lines",
+       x = "Week of the Year",
+       y = "Total Cases",
+       color = "Year") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Create a continuous week number variable
+weekly_cases_by_year <- weekly_cases_by_year %>%
+  mutate(
+    Year = as.numeric(Year),
+    Week = as.numeric(Week)
+  )
+
+# Correctly calculate the continuous week number
+weekly_cases_by_year <- weekly_cases_by_year %>%
+  arrange(Year, Week) %>%
+  mutate(Continuous_Week = (Year - min(Year)) * 52 + Week)
+
+print(weekly_cases_by_year)
+year_breaks <- c(1, 53, 105)  # Starting week of each year (1, 2022), (53, 2023), (105, 2024)
+year_labels <- c("2022", "2023", "2024")
+
+# Plot cases from 2022-2024
+ggplot(weekly_cases_by_year, aes(x = Continuous_Week, y = Total_Cases)) +
+  geom_line(alpha = 0.5, color = "black") +  # Line for Total Cases
+  geom_smooth(se = FALSE, method = "loess", span = 0.2, color = "red") +  # Smooth line for Total Cases
+  labs(
+    title = "Suspected Meningitis Cases",
+    x = "Year and Week",
+    y = "Total Suspected Cases"
+  ) +
+  scale_x_continuous(
+    breaks = c(1, 53, 105),  # Adjust based on the range of your data
+    labels = c("2022", "2023", "2024"),
+    limits = c(1, (2024 - 2022) * 52 + 16),
+    minor_breaks = seq(1, (2024 - 2022) * 52 + 13, by = 1)
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.ticks.length = unit(0.5, "cm"),
+    axis.ticks.x = element_line(color = "black")
+  ) +
+  geom_vline(xintercept = c(1, 53, 105), linetype = "dashed", color = "grey")
+
+#Plot Deaths from 2022-2024
+ggplot(weekly_cases_by_year, aes(x = Continuous_Week, y = Total_Deaths)) +
+  geom_line(alpha = 0.5, color = "black") +  # Line for CFR
+  geom_smooth(se = FALSE, method = "loess", span = 0.2, color = "darkred") +  # Smooth line for CFR
+  labs(
+    title = "Total Meningitis Deaths Over Time",
+    x = "Year and Week",
+    y = "Total Deaths"
+  ) +
+  scale_x_continuous(
+    breaks = c(1, 53, 105),  # Adjust based on the range of your data
+    labels = c("2022", "2023", "2024"),
+    limits = c(1, (2024 - 2022) * 52 + 16),
+    minor_breaks = seq(1, (2024 - 2022) * 52 + 13, by = 1)
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.ticks.length = unit(0.5, "cm"),
+    axis.ticks.x = element_line(color = "black")
+  ) +
+  geom_vline(xintercept = c(1, 53, 105), linetype = "dashed", color = "grey")
+
+#Plot CFR from 2022-2024
+ggplot(weekly_cases_by_year, aes(x = Continuous_Week, y = CFR)) +
+  geom_line(alpha = 0.5, color = "black") +  # Line for CFR
+  geom_smooth(se = FALSE, method = "loess", span = 0.2, color = "darkred") +  # Smooth line for CFR
+  labs(
+    title = "Case Fatality Rate",
+    x = "Year and Week",
+    y = "CFR (%)"
+  ) +
+  scale_x_continuous(
+    breaks = c(1, 53, 105),  # Adjust based on the range of your data
+    labels = c("2022", "2023", "2024"),
+    limits = c(1, (2024 - 2022) * 52 + 16),
+    minor_breaks = seq(1, (2024 - 2022) * 52 + 13, by = 1)
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.ticks.length = unit(0.5, "cm"),
+    axis.ticks.x = element_line(color = "black")
+  ) +
+  geom_vline(xintercept = c(1, 53, 105), linetype = "dashed", color = "grey")
+
+
+##Map the monthly cases per district
+district_case_data <- angola_districts %>%
+  left_join(full_data, by = "NAME_2")
+
+district_case_data <- district_case_data %>%
+  group_by(NAME_1, NAME_2, geometry) %>%
+  summarize(
+    Total_Cases = sum(Cases, na.rm = TRUE),
+    Total_Deaths = sum(Deaths, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+district_case_data$geometry_centroid <- st_centroid(district_case_data$geometry)
+
+district_case_data_monthly <- angola_districts %>%
+  left_join(filter(full_data, between(as.Date(paste(Year, Week, 1, sep="-"), "%Y-%U-%u"), 
+                                      as.Date("2022-03-01"), as.Date("2024-04-30"))), 
+            by = "NAME_2") %>%
+  mutate(Date = as.Date(paste(Year, Week, 1, sep="-"), "%Y-%U-%u"),
+         Month = floor_date(Date, "month")) %>%
+  group_by(NAME_1, NAME_2, Month) %>%
+  summarize(
+    Total_Cases = sum(Cases, na.rm = TRUE),
+    Total_Deaths = sum(Deaths, na.rm = TRUE),
+    geometry = st_union(geometry),
+    .groups = 'drop'
+  )
+
+district_case_data_monthly <- district_case_data_monthly %>%
+  filter(Month >= as.Date("2022-03-01") & Month <= as.Date("2024-04-30"))
+
+ggplot(data = district_case_data_monthly) +
+  geom_sf(aes(geometry = geometry, fill = Total_Cases), color = "grey", size = 0.001) + 
+  scale_fill_gradientn(
+    colours = c("white", "pink", "darkred"),
+    values = scales::rescale(c(0, 1, max(district_case_data_monthly$Total_Cases, na.rm = TRUE))),
+    limits = c(0, max(district_case_data_monthly$Total_Cases, na.rm = TRUE)),
+    na.value = "lightgrey",  # Color for NA values
+    name = "Total Cases"
+  ) +
+  labs(
+    title = "Total Meningitis Cases per District in Angola (March 2022 - April 2024)",
+    x = NULL, y = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    panel.grid.major = element_blank(),  # Remove major gridlines
+    panel.grid.minor = element_blank(),   # Remove minor gridlines
+    axis.text = element_blank(),         # Remove axis text
+    axis.title = element_blank(),        # Remove axis titles
+    axis.ticks = element_blank()         # Remove axis ticks
+  ) +
+  facet_wrap(~ Month, ncol = 6, labeller = label_date(format = "%B %Y"))
+
+
+
+#2023 Case data
+
+district_case_data_2023 <- angola_districts %>%
+  left_join(filter(full_data, Year == 2023), by = "NAME_2") %>%
+  group_by(NAME_1, NAME_2) %>%
+  summarize(
+    Total_Cases = sum(Cases, na.rm = TRUE),
+    Total_Deaths = sum(Deaths, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+#Add centroids to district_case_data_2023
+district_case_data_2023 <- district_case_data_2023 %>%
+  mutate(centroid_ll = st_centroid(geometry))
+
+district_case_data_2023 <- district_case_data_2023 %>%
+  mutate(centroid_utm = st_transform(centroid_ll, crs = 32733))
+
+district_case_data_2023 <- district_case_data_2023 %>%
+  mutate(centroid_utm_x = st_coordinates(centroid_utm)[,1],
+         centroid_utm_y = st_coordinates(centroid_utm)[,2])
+
+
+#District Map of cases in 2023
+
+ggplot(data = district_case_data_2023) +
+  geom_sf(aes(fill = Total_Cases), color = "black", size = 0.2) + 
+  scale_fill_gradientn(
+    colours = c("white", "pink", "darkred"),
+    values = scales::rescale(c(0, 1, max(district_case_data_2023$Total_Cases))),
+    limits = c(0, max(district_case_data_2023$Total_Cases)),
+    na.value = "lightgrey",  # Color for NA values
+    name = "Total Cases"
+  ) +
+  labs(
+    title = "Total Meningitis Cases per District in Angola 2022-2024",
+    subtitle = "Districts with 0 cases are shown in grey",
+    x = NULL, y = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    panel.grid.major = element_blank(),  # Remove major gridlines
+    panel.grid.minor = element_blank(),   # Remove minor gridlines
+    axis.text = element_blank(),         # Remove axis text
+    axis.title = element_blank(),        # Remove axis titles
+    axis.ticks = element_blank()         # Remove axis ticks
+  )
+  
+
+
+#Map cases by region
+
+#Add regions to full_data
+full_data <- full_data %>%
+  left_join(angola_shape_district %>% select(NAME_1, NAME_2), by = "NAME_2")
+
+#Add Luanda (because districts have been transformed to all = Luanda)
+full_data <- full_data %>%
+  mutate(NAME_1 = if_else(NAME_2 == "Luanda", "Luanda", NAME_1))
+
+#Add cases to region shapefile
+angola_regions<- angola_regions %>%
+  select(NAME_1, geometry)
+
+regional_case_data <- full_data %>%
+  group_by(NAME_1) %>%
+  summarize(
+    Total_Cases = sum(Cases, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+angola_regions <- angola_regions %>%
+  left_join(regional_case_data, by = "NAME_1")
+
+angola_regions <- angola_regions %>%
+  mutate(centroid_x = centroids[, 1], centroid_y = centroids[, 2])
+
+#Regional map of cases between 2022-2024
+
+ggplot(data = angola_regions) +
+  geom_sf(aes(fill = Total_Cases), color = "black", size = 0.2) +
+  scale_fill_gradientn(
+    colours = c("white", "pink", "darkred"),
+    values = scales::rescale(c(0, max(angola_regions$Total_Cases, na.rm = TRUE))),
+    limits = c(0, max(angola_regions$Total_Cases, na.rm = TRUE)),
+    na.value = "grey",
+    name = "Total Cases"
+  ) +
+  geom_text_repel(
+    aes(x = centroid_x, y = centroid_y, label = NAME_1), 
+    size = 3, 
+    color = "darkgrey", 
+    fontface ="bold",
+    max.overlaps = 20,
+    point.padding = unit(0.5, "lines"), # Adjust padding if needed
+    segment.size = 0.5, 
+    segment.color = "black",
+    arrow = arrow(length = unit(0.01, "npc")),
+    force = 1,
+    nudge_x = 0,
+    nudge_y = 0
+  ) +
+  labs(
+    title = "Total Cases per Region in Angola",
+    x = "",
+    y = ""
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+
+
+# 2023 cases map
+
+ggplot(data = district_case_data_2023) +
+  geom_sf(aes(fill = Total_Cases), color = "white", size = 0.2) + 
+  scale_fill_gradientn(
+    colours = c("grey", "pink", "darkred"),
+    values = scales::rescale(c(0, 1, max(district_case_data_2023$Total_Cases))),
+    limits = c(0, max(district_case_data$Total_Cases)),
+    na.value = "grey",  # Color for NA values
+    name = "Total Cases"
+  ) +
+  labs(
+    title = "Total Meningitis Cases per District in Angola 2023",
+    subtitle = "Districts with 0 cases are shown in grey",
+    x = NULL, y = NULL
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+
+########################## POPULATION COUNT ####################################
+
+pop_raster <- raster("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Population_Count/Population_Count_Angola_2020.tif")
+pop_data <- raster::extract(pop_raster, angola_districts, fun = sum, na.rm = TRUE)
+angola_districts$Total_Population <- pop_data
+
+ggplot(data = angola_districts) +
+  geom_sf(aes(fill = Total_Population), color = "black", size = 0.1) +  # Define the boundary color and size
+  scale_fill_gradient(low = "white", high = "red", name = "Population") +  # Set color gradient from white (low) to red (high)
+  labs(title = "Population per District in Angola",
+       subtitle = "Based on 2020 data",
+       fill = "Population") +
+  theme_minimal() +
+  theme(legend.position = "right", 
+        plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5),
+        legend.title.align = 0.5)
+
+######################## Incidence ###########################################
+
+#For 2022-2024
+
+total_district_epi_data <- summary(full_data, )
+total_cases_per_district <- full_data %>%
+  group_by(NAME_2) %>%
+  summarize(
+    Total_Cases = sum(Cases, na.rm = TRUE),
+    Total_Deaths = sum(Deaths, na.rm = TRUE)  # Summing up deaths
+  )
+
+total_cases_per_district <- total_cases_per_district %>%
+  left_join(angola_districts %>% select(NAME_2, Total_Population), by = "NAME_2") %>%
+  rename(Total_Population = Total_Population) 
+
+total_cases_per_district$Attack_Rate <-  (((total_cases_per_district$Total_Cases/ total_cases_per_district$Total_Population*2)/2))*10000
+
+total_cases_per_district$Total_Population <- as.numeric(total_cases_per_district$Total_Population[,1])
+total_cases_per_district$Attack_Rate <- as.numeric(total_cases_per_district$Attack_Rate[,1])
+
+if (!inherits(total_cases_per_district, "sf")) {
+  total_cases_per_district <- st_as_sf(total_cases_per_district, sf_column_name = "geometry")
+}
+
+ggplot(data = total_cases_per_district) +
+  geom_sf(aes(fill = Attack_Rate), color = "black", size = 0.1) +
+  scale_fill_gradientn(
+    colours = c("white", "pink", "darkred"),  # Transition from white to pink to dark red
+    values = rescale(c(0, 0.02, 0.04)),  # Adjust as necessary for your data
+    name = "Incidence (per 100,000 per year)",
+    na.value = "lightgrey"  # Set NA values to be colored light grey
+  ) +
+  labs(
+    title = "District-level Yearly Incidence in Angola 2022-2024",
+    x = NULL,
+    y = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+#Incidence in 2023
+district_case_data_2023$population <-pop_data #Add population column
+district_case_data_2023$Attack_Rate <- (as.numeric(district_case_data_2023$Total_Cases/district_case_data_2023$population))*100
+
+
+#Case fatality rate
+total_cases_per_district$CFR <- total_cases_per_district$Total_Deaths/ total_cases_per_district$Total_Cases
+
+
+########################### MORTALITY RATE #####################################
+
+#2022-2024
+total_cases_per_district$CFR <- (total_cases_per_district$Total_Deaths/ total_cases_per_district$Total_Cases)*100
+total_cases_per_district$CFR <- as.numeric(total_cases_per_district$CFR)
+
+ggplot(data = total_cases_per_district) +
+  geom_sf(aes(fill = CFR), color = "black", size = 0.1) +  
+  scale_fill_gradientn(
+    colours = c("white", "pink", "darkred"),  
+    values = rescale(c(0, 0.02, 0.04)),  
+    name = "Case Fatality Rate (%)",
+    na.value = "lightgrey" 
+  ) +
+  labs(
+    title = "District-level Case Fatality Rate in Angola 2022-2024",
+    x = NULL,
+    y = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+#2023
+
+district_case_data_2023$CFR <- (as.numeric(district_case_data_2023$Total_Deaths/district_case_data_2023$Total_Cases))*100
+ggplot(data = district_case_data_2023) +
+  geom_sf(aes(fill = CFR), color = "black", size = 0.1) +  # Ensure 'CFR' is a column in your dataframe
+  scale_fill_gradient(low = "white", high = "red", name = "Case Fatality Rate (%)") +
+  labs(title = "District-level Case Fatality Rate in Angola 2023") +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+########################### Outbreak Threshold #################################
+
+# Definition: Any district with at least 10 suspected cases per 100,000 population per week, 
+# alongside at least 10 cumulative confirmed meningitis cases per year
+
+head(full_data)
+head(angola_districts)
+
+angola_districts_pop <- angola_districts %>%
+  select(NAME_2, Total_Population)
+
+full_epi_data <- full_data %>%
+  left_join(angola_districts_pop, by = "NAME_2")
+
+full_epi_data$incidence <- full_epi_data$Cases/full_epi_data$Total_Population
+full_epi_data$cases_per_100k <- (full_epi_data$incidence)*100000
+
+full_epi_data <- full_epi_data %>%
+  group_by(NAME_2, Year) %>%
+  mutate(Yearly_Total_Cases = sum(Cases, na.rm = TRUE))
+
+full_epi_data <- full_epi_data %>%
+  mutate(Outbreak = ifelse(cases_per_100k > 10 & Yearly_Total_Cases > 10, "Yes", "No"))
+
+full_epi_data <- full_epi_data %>%
+  group_by(NAME_2,Year) %>%
+  mutate(Max_Cases_per_100k = max(cases_per_100k, na.rm = TRUE)) %>%
+  ungroup()
+
+
+filtered_data <- full_epi_data %>% filter(!is.na(NAME_1))
+p <- ggplot(full_epi_data, aes(x = Max_Cases_per_100k, y = Yearly_Total_Cases, 
+                               text = paste("District: ", NAME_2, "<br>",
+                                            "Region: ", NAME_1, "<br>",
+                                            "Year: ", Year))) +
+  geom_point(aes(color = NAME_1), alpha = 1) +  
+  scale_color_discrete(name = "Region") +
+  geom_segment(x = 10, y = 10, xend = 12, yend = 10, color = "darkred", size = 1, linetype = "dotted") +  
+  geom_segment(x = 10, y = 10, xend = 10, yend = 250, color = "darkred", size = 1, linetype = "dotted") + 
+  annotate("text", x = 10.5, y = 200, label = "Epidemic Threshold", color = "darkred", angle = 90, hjust = 1, vjust = 1, size = 4) + 
+  geom_segment(x = 3, y = 2, xend = 3, yend = 250, color = "orange", size = 1, linetype="dotted") +  
+  geom_segment(x = 3, y = 2, xend = 12, yend = 2, color = "orange", size = 1, linetype="dotted" )+  
+  annotate("text", x = 4, y = 200, label = "Alert Threshold", color = "orange", angle = 90, hjust = 1, vjust = 1, size = 4) +  
+  coord_cartesian(xlim = c(0, 12), ylim = c(0, 250)) +  
+  labs(x = "Maximum Weekly Cases per 100k", y = "Cummulative Yearly Cases", title = "WHO Outbreak Identification") +
+  theme_minimal() +  
+  theme(legend.position = "bottom")  
+
+p
+# Convert ggplot to plotly object for interactivity
+p_interactive <- ggplotly(p, tooltip = "text")
+
+# Display the interactive plot
+p_interactive
+
+# Split cases to district and region
+
+full_data <- full_data %>%
+  mutate(Year = as.numeric(Year),
+         Week = as.numeric(Week))
+
+
+#Filter and select relevant columns for district-level data
+district_weekly_epi <- full_data %>%
+  select(NAME_2, Week, Year, Cases, Deaths, NAME_1 = NAME_1.x)
+
+# Filter and select relevant columns for regional-level data
+regional_weekly_epi <- full_data %>%
+  select(NAME_1.x, Week, Year, Cases, Deaths)
+
+get_start_date <- function(year, week) {
+  as.Date(paste(year, 1, 1, sep = "-")) + (week - 1) * 7
+}
+
+full_data <- full_data %>%
+  mutate(StartDate = mapply(get_start_date, Year, Week))
+
+
+#### Write Monthly Data for Statistical Analysis
+
+get_week_dates <- function(year, week) {
+  start_date <- as.Date(paste(year, 1, 1, sep = "-")) + (week - 1) * 7
+  end_date <- start_date + 6
+  return(list(start_date = start_date, end_date = end_date))
+}
+
+full_data <- full_data %>%
+  rowwise() %>%
+  mutate(dates = list(get_week_dates(Year, Week))) %>%
+  unnest_wider(dates)
+
+apportion_cases_deaths <- function(start_date, end_date, cases, deaths) {
+  days_in_month <- seq.Date(start_date, end_date, by = "day")
+  month_days <- table(format(days_in_month, "%Y-%m"))
+  
+  apportioned_data <- data.frame(
+    Year = as.integer(substr(names(month_days), 1, 4)),
+    Month = as.integer(substr(names(month_days), 6, 7)),
+    Cases = (cases / length(days_in_month)) * as.vector(month_days),
+    Deaths = (deaths / length(days_in_month)) * as.vector(month_days)
+  )
+  
+  return(apportioned_data)
+}
+
+apportioned_data <- full_data %>%
+  rowwise() %>%
+  mutate(apportioned = list(apportion_cases_deaths(start_date, end_date, Cases, Deaths))) %>%
+  select(NAME_2, NAME_1.x, apportioned) %>%
+  unnest(apportioned)
+
+district_monthly_data <- apportioned_data %>%
+  group_by(NAME_2, Year, Month) %>%
+  summarize(Cases = sum(Cases, na.rm = TRUE),
+            Deaths = sum(Deaths, na.rm = TRUE),
+            Region = first(NAME_1.x)) %>%
+  ungroup()
+
+regional_monthly_data <- apportioned_data %>%
+  group_by(NAME_1.x, Year, Month) %>%
+  summarize(Cases = sum(Cases, na.rm = TRUE),
+            Deaths = sum(Deaths, na.rm = TRUE)) %>%
+  ungroup()
+
+district_monthly_data$Cases <- round(district_monthly_data$Cases, 0)
+district_monthly_data$Deaths <- round(district_monthly_data$Deaths, 0)
+regional_monthly_data$Cases <- round(regional_monthly_data$Cases, 0)
+regional_monthly_data$Deaths <- round(regional_monthly_data$Deaths, 0)
+
+write.csv(district_monthly_data, "/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Epi_Data/Monthly_Data/district_monthly_data.csv", row.names = FALSE)
+
+write.csv(regional_monthly_data, "/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Epi_Data/Monthly_Data/regional_monthly_data.csv", row.names = FALSE)
+
+
+
+
