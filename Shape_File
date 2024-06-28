@@ -1,4 +1,4 @@
-library(tidyr)
+nglibrary(tidyr)
 library(ncdf4)
 library(raster)
 library(sf)
@@ -91,7 +91,7 @@ library(ggrepel)
         select(NAME_1, NAME_2, geometry) %>%
         mutate(NAME_2 = if_else(NAME_2 == "Baía Farta", "Baia Farta", NAME_2))
       
-     #This is to make the names work in google earth
+     #This is to make the names work in google earth engine
       output_path_regions <- "/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Shape_File/Updated/angola_regions_utf8.shp"
       output_path_districts <- "/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Shape_File/Updated/angola_districts_utf8.shp"
       
