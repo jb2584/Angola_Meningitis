@@ -1,0 +1,243 @@
+
+############################# Aerosols ############################################
+
+# Annual Data 
+dust_summary<-read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Dust/YearlyDust_perDistrict.csv" )
+
+average_dust <- dust_summary %>%
+  filter(Year >= 2003 & Year <= 2023) %>%
+  group_by(District) %>%
+  summarize(Avg_Dust = mean(Mean_Dust, na.rm = TRUE), .groups = 'drop') 
+
+average_dust$NAME_2 <- average_dust$District
+# Merge the average dust data back onto the spatial data
+angola_districts <- angola_districts %>%
+  left_join(average_dust, by = "NAME_2")
+
+
+#2023 Data
+dust_2023 <- dust_summary %>%
+  filter(Year == 2023)
+
+district_case_data_2023 <- district_case_data_2023 %>%
+  left_join(dust_2023, by = c("NAME_2" = "District"))
+
+ggplot(data = district_case_data_2023) +
+  geom_sf(aes(fill = Mean_Dust), color = "white", size = 0.5) +  
+  scale_fill_gradient(low = "white", high = "saddlebrown", name = "Avg Dust Level") +  
+  labs(
+    title = "Average Dust Levels per District in Angola (2023)",
+    subtitle = "Aerosol optical depth over land MODIS Green band (0.55 μm)"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    legend.title = element_text(size = 10),
+    plot.title = element_text(size = 14, face = "bold"),
+    plot.subtitle = element_text(size = 12)
+  )
+
+#4 year averages
+
+dust_summary <- dust_summary %>%
+  filter(Year >= 2000) %>%
+  mutate(Period = cut(Year, breaks = c(seq(2000, 2020, by = 4), 2023), right = FALSE, labels = FALSE))
+
+# Calculate average dust levels for 4-year periods
+avg_dust_4yr <- dust_summary %>%
+  group_by(District, Period) %>%
+  summarize(Avg_Dust = mean(Mean_Dust, na.rm = TRUE)) %>%
+  ungroup() %>%
+  filter(!is.na(Period) & !is.na(Avg_Dust))
+
+avg_dust_4yr <- avg_dust_4yr %>%
+  mutate(Period_Label = paste0((Period - 1) * 4 + 2000, "-", (Period - 1) * 4 + 2003))
+
+dust_summary <- dust_summary %>%
+  mutate(Period_Label = case_when(
+    Period == 1 ~ "2000-2003",
+    Period == 2 ~ "2004-2007",
+    Period == 3 ~ "2008-2011",
+    Period == 4 ~ "2012-2015",
+    Period == 5 ~ "2016-2019",
+    Period == 6 ~ "2020-2023",
+    TRUE ~ NA_character_
+  ))
+
+# Identify the baseline dust levels for 2000-2003
+baseline_dust <- avg_dust_4yr %>%
+  filter(Period == 1) %>%
+  select(District, Baseline_Dust = Avg_Dust)
+
+# Calculate the percentage change from the baseline
+dust_change_from_baseline <- avg_dust_4yr %>%
+  left_join(baseline_dust, by = "District") %>%
+  mutate(Percentage_Change = ((Avg_Dust - Baseline_Dust) / Baseline_Dust) * 100) %>%
+  filter(Period != 1)  # Exclude the baseline period
+
+# Merge the percentage change data with the spatial data
+angola_avg_dust_change_map <- angola_districts %>%
+  left_join(dust_change_from_baseline, by = c("NAME_2" = "District"))
+
+# Plotting the percentage change on a map
+threshold <- 50  # Set your threshold here
+angola_avg_dust_change_map <- angola_avg_dust_change_map %>%
+  mutate(Capped_Percentage_Change = ifelse(abs(Percentage_Change) > threshold, 
+                                           sign(Percentage_Change) * threshold, 
+                                           Percentage_Change))
+
+# Plotting the percentage change on a map with capped values
+ggplot(data = angola_avg_dust_change_map) +
+  geom_sf(aes(fill = Capped_Percentage_Change), color = NA) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0, 
+                       limits = c(-threshold, threshold),  # Set limits for the color scale
+                       breaks = c(-threshold, -threshold/2, 0, threshold/2, threshold),
+                       labels = c(paste0("<", -threshold), paste0("-", threshold/2), "0", paste0("+", threshold/2), paste0(">", threshold)),
+                       name = "Percentage Change in AOD") +
+  facet_wrap(~ Period_Label, nrow = 1) +  # Ensure all plots are in one row with labels
+  labs(title = "Percentage Change in AOD",
+       subtitle = "By District in Angola") +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(size = 10),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(),  # Remove major grid lines
+    panel.grid.minor = element_blank(),  # Remove minor grid lines
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+#Regional Data
+dust_summary_regional <- data.frame(Region = character(), Year = integer(), Mean_Dust = numeric())
+
+# Loop through each year and calculate mean dust levels for each region
+for (year in 2000:2023) {
+  dust_path <- sprintf("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Dust/GoogleEarthEngine/Mean_AOD_Angola_%d.tif", year)
+  
+  if (!file.exists(dust_path)) {
+    cat("File does not exist:", dust_path, "\n")
+    next # Skip this iteration if the file does not exist
+  }
+  
+  dust_data <- raster(dust_path)
+  mean_dust_per_region <- raster::extract(dust_data, angola_regions, fun = mean, na.rm = TRUE)
+  temp_df <- data.frame(Region = angola_regions$NAME_1, Year = year, Mean_Dust = mean_dust_per_region)
+  
+  dust_summary_regional <- rbind(dust_summary_regional, temp_df)
+}
+
+dust_summary_regional <- dust_summary_regional %>%
+  mutate(Mean_Dust = Mean_Dust * 0.001)
+
+# Calculate the 24-year average dust levels for each region
+twenty_four_year_avg_dust <- dust_summary_regional %>%
+  group_by(Region) %>%
+  summarize(Twenty_Four_Year_Avg_Dust = mean(Mean_Dust, na.rm = TRUE)) %>%
+  ungroup()
+
+# Merge the average dust data with the spatial data
+angola_regions_dust <- angola_regions %>%
+  left_join(twenty_four_year_avg_dust, by = c("NAME_1" = "Region"))
+
+# Calculate the centroid coordinates for labeling
+angola_regions_dust <- angola_regions_dust %>%
+  mutate(centroid = st_centroid(geometry),
+         centroid_x = st_coordinates(centroid)[,1],
+         centroid_y = st_coordinates(centroid)[,2])
+
+# Plot the 24-year average dust levels on a map
+ggplot(data = angola_regions_dust) +
+  geom_sf(aes(fill = Twenty_Four_Year_Avg_Dust), color = "lightgrey", size = 0.2) +
+  scale_fill_gradient(low = "white", high = "saddlebrown", name = "Mean AOD") +
+  geom_text_repel(
+    aes(x = centroid_x, y = centroid_y, label = NAME_1), 
+    size = 3, 
+    color = "black", 
+    fontface ="bold",
+    max.overlaps = 20,
+    point.padding = unit(0.5, "lines"), # Adjust padding if needed
+    segment.size = 0.5, 
+    segment.color = "black",
+    arrow = arrow(length = unit(0.01, "npc")),
+    force = 1,
+    nudge_x = 0,
+    nudge_y = 0
+  ) +
+  labs(
+    title = "24-Year Average Dust Levels by Region in Angola (2000-2023)",
+    x = "",
+    y = ""
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+
+# Order regions by dust level in 2023 for better visualization
+regions_ordered <- dust_summary_regional %>%
+  filter(Year == 2023) %>%
+  arrange(desc(Mean_Dust)) %>%
+  pull(Region)
+
+dust_summary_regional <- dust_summary_regional %>%
+  mutate(Region = factor(Region, levels = regions_ordered))
+
+# Plot the regional trend lines for dust
+ggplot(dust_summary_regional, aes(x = Year, y = Mean_Dust, group = Region, color = Region)) +
+  geom_line() +
+  labs(
+    title = "",
+    x = "Year",
+    y = "Mean AOD"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "right"
+  )
+
+
+monthly_aod_data_regions <- read_csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Dust/Monthly/Combined_Monthly_Mean_AOD_Regions_Angola_2000_2023.csv")
+
+# Calculate 24-year average monthly AOD
+avg_monthly_aod_regions <- monthly_aod_data_regions %>%
+  group_by(property, month) %>%
+  summarize(Avg_Monthly_AOD = mean(mean_aod, na.rm = TRUE)/1000) %>%
+  ungroup()
+
+# Create a factor for month to ensure correct order in the plot
+avg_monthly_aod_regions <- avg_monthly_aod_regions %>%
+  mutate(month = factor(month, levels = 1:12, labels = month.abb))
+
+# Order the regions by their average December AOD
+regions_ordered <- avg_monthly_aod_regions %>%
+  filter(month == "Dec") %>%
+  arrange(desc(Avg_Monthly_AOD)) %>%
+  pull(property)
+
+# Reorder the factor levels of 'property' based on the December average
+avg_monthly_aod_regions <- avg_monthly_aod_regions %>%
+  mutate(property = factor(property, levels = regions_ordered))
+
+# Plot the 24-year average monthly AOD by region
+ggplot(avg_monthly_aod_regions, aes(x = month, y = Avg_Monthly_AOD, color = property, group = property)) +
+  geom_line() +
+  labs(
+    title = "24-Year Average Monthly AOD by Region in Angola (2000-2023)",
+    x = "Month",
+    y = "Mean Monthly AOD",
+    color = "Region"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
