@@ -1,0 +1,176 @@
+library(moments)
+library(dplyr)
+library(ggplot2)
+library(sf)
+library(ggrepel)
+library(readr)
+
+################################## WIND SPEED ############################################
+
+#Annual Windspeed
+
+wind_summary<-read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Wind_Speed/Annual_Means/YearlyWind_perDistrict.csv")
+
+wind_summary$Mean_Wind <-wind_summary$Mean_Wind*0.01
+# 2023 Data
+wind_2023 <- wind_summary %>%
+  filter(Year == 2023)
+
+district_case_data_2023$Mean_Wind <- wind_2023$Mean_Wind
+
+ggplot(data = district_case_data_2023) +
+  geom_sf(aes(fill = Mean_Wind), color = "white", size = 0.5) +
+  scale_fill_gradient(low = "white", high = "purple", name = "Avg Windspeed (m/s)") +
+  labs(
+    title = "Average Windspeed per District in Angola (2023)",
+    subtitle = "Windspeed at 2m"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    plot.title = element_text(size = 14, face = "bold"),
+    plot.subtitle = element_text(size = 12),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank()
+  )
+
+#4 year trend
+wind_summary <- wind_summary %>%
+  filter(Year >= 2000) %>%
+  mutate(Period = cut(Year, breaks = c(seq(2000, 2020, by = 4), 2023), right = FALSE, labels = FALSE))
+
+# Create descriptive period labels
+wind_summary <- wind_summary %>%
+  mutate(Period_Label = case_when(
+    Period == 1 ~ "2000-2003",
+    Period == 2 ~ "2004-2007",
+    Period == 3 ~ "2008-2011",
+    Period == 4 ~ "2012-2015",
+    Period == 5 ~ "2016-2019",
+    Period == 6 ~ "2020-2023",
+    TRUE ~ NA_character_
+  ))
+
+# Calculate average windspeed levels for 4-year periods
+avg_wind_4yr <- wind_summary %>%
+  group_by(District, Period_Label) %>%
+  summarize(Avg_Wind = mean(Mean_Wind, na.rm = TRUE)) %>%
+  ungroup() %>%
+  filter(!is.na(Period_Label) & !is.na(Avg_Wind))
+
+
+# Identify the baseline windspeed levels for 2000-2003
+baseline_wind <- avg_wind_4yr %>%
+  dplyr::filter(Period_Label == "2000-2003") %>%
+  dplyr::select(District, Baseline_Wind = Avg_Wind)
+
+# Calculate the percentage change from the baseline
+wind_change_from_baseline <- avg_wind_4yr %>%
+  left_join(baseline_wind, by = "District") %>%
+  mutate(Percentage_Change = ((Avg_Wind - Baseline_Wind) / Baseline_Wind) * 100) %>%
+  filter(Period_Label != "2000-2003")  # Exclude the baseline period
+
+
+# Merge the percentage change data with the spatial data
+angola_avg_wind_change_map <- angola_districts %>%
+  left_join(wind_change_from_baseline, by = c("NAME_2" = "District"))
+
+# Plotting the percentage change on a map
+ggplot(data = angola_avg_wind_change_map) +
+  geom_sf(aes(fill = Percentage_Change), color = NA) +
+  scale_fill_gradient2(
+    low = "darkgrey", high = "purple", mid = "white", midpoint = 0,
+    name = "Change in Wind Speed (%)"
+  ) +
+  facet_wrap(~ Period_Label, nrow = 1) +
+  labs(
+    title = "Change in Windspeed Relative to Baseline (2000-2003)"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    strip.text.x = element_text(size = 10, angle = 0, hjust = 0.5),
+    panel.spacing = unit(1, "lines"),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+#Regional data
+# Initialize an empty dataframe to store the results
+windspeed_summary_regional <- data.frame(Region = character(), Year = integer(), Mean_Windspeed = numeric())
+
+# Loop through each year and calculate mean windspeed levels for each region
+
+windspeed_summary_regional <- read.csv( "/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Wind_Speed/Annual_Means/windspeed_summary_regional.csv")
+
+windspeed_summary_regional <- windspeed_summary_regional %>%
+  mutate(Mean_Windspeed = Mean_Windspeed / 100)
+# Calculate the 24-year average windspeed levels for each region
+twenty_four_year_avg_windspeed <- windspeed_summary_regional %>%
+  group_by(Region) %>%
+  summarize(Twenty_Four_Year_Avg_Windspeed = mean(Mean_Windspeed, na.rm = TRUE)) %>%
+  ungroup()
+
+# Merge the average windspeed data with the spatial data
+angola_regions_windspeed <- angola_regions %>%
+  left_join(twenty_four_year_avg_windspeed, by = c("NAME_1" = "Region"))
+
+# Calculate the centroid coordinates for labeling
+angola_regions_windspeed <- angola_regions_windspeed %>%
+  mutate(centroid = st_centroid(geometry),
+         centroid_x = st_coordinates(centroid)[,1],
+         centroid_y = st_coordinates(centroid)[,2])
+
+# Plot the 24-year average windspeed levels on a map
+ggplot(data = angola_regions_windspeed) +
+  geom_sf(aes(fill = Twenty_Four_Year_Avg_Windspeed), color = "lightgrey", size = 0.2) +
+  scale_fill_gradient(low = "white", high = "purple", name = "Mean Wind Speed (m/s)") +
+  geom_text_repel(
+    aes(x = centroid_x, y = centroid_y, label = NAME_1), 
+    size = 3, 
+    color = "black", 
+    fontface ="bold",
+    max.overlaps = 20,
+    point.padding = unit(0.5, "lines"), # Adjust padding if needed
+    segment.size = 0.5, 
+    segment.color = "black",
+    arrow = arrow(length = unit(0.01, "npc")),
+    force = 1,
+    nudge_x = 0,
+    nudge_y = 0
+  ) +
+  labs(
+    title = "24-Year Average Windspeed by Region in Angola (2000-2023)",
+    x = "",
+    y = ""
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+windspeed_summary_regional <- windspeed_summary_regional %>%
+  mutate(Region = factor(Region, levels = unique(Region[order(Mean_Windspeed, decreasing = TRUE)])))
+
+# Plot the windspeed trends for each district over the 24-year period
+ggplot(windspeed_summary_regional, aes(x = Year, y = Mean_Windspeed, group = Region, color = Region)) +
+  geom_line() +
+  labs(
+    title = "Windspeed Trends by Region in Angola (2000-2023)",
+    x = "Year",
+    y = "Mean Windspeed (m/s)"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "right"
+  )
