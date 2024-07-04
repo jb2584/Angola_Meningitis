@@ -1,0 +1,23 @@
+
+region_monthly_rain <- data.frame(Region = character(), Year = integer(), Month = integer(), Mean_Precip = numeric())
+
+# Loop through each year and month
+for (year in 2000:2023) {
+  for (month in 1:12) {
+    precip_path <- sprintf("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Precipitation/Monthly_Data/Monthly_Data/chirps-v2.0.%d.%02d.tif", year, month)
+    try({
+      precip_data <- raster(precip_path)
+      mean_precip_per_region <- raster::extract(precip_data, as(angola_regions, "Spatial"), fun = mean, na.rm = TRUE)
+      precip_df <- data.frame(region = angola_regions$NAME_1, Year = year, Month = month, Mean_Precip = mean_precip_per_region)
+      
+      region_monthly_rain <- rbind(region_monthly_rain, precip_df)
+    }, silent = FALSE) # Display errors
+  }
+}
+
+
+# Write the results to a CSV file
+write.csv(region_monthly_rain, "/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Precipitation/Monthly_Data/Monthly_region_Rain.csv" )
+
+# Print the first few rows of the resulting data frame
+print(head(region_monthly_rain))
