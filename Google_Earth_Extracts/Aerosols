@@ -1,0 +1,86 @@
+// Define the time range
+var startYear = 2000;
+var endYear = 2023;
+
+// Load the uploaded shapefile for regions and districts
+var regions = ee.FeatureCollection('projects/angolaclimatemeningitis/assets/angola_regions_utf8');
+var districts = ee.FeatureCollection('projects/angolaclimatemeningitis/assets/angola_districts_utf8');
+
+// Define the CRS and scale
+var crs = 'EPSG:4326';
+var scale = 10000;
+
+// Function to calculate monthly mean AOD
+var calculateMonthlyMeanAOD = function(year, month, collection, property) {
+  var startDate = ee.Date.fromYMD(year, month, 1);
+  var endDate = startDate.advance(1, 'month');
+
+  // Filter the dataset for the specified month and area
+  var monthlyAOD = ee.ImageCollection('MODIS/061/MCD19A2_GRANULES')
+                      .filterDate(startDate, endDate)
+                      .filterBounds(collection)
+                      .select('Optical_Depth_055') // Select the AOD band
+                      .mean(); // Calculate the mean AOD
+
+  // Check if the image has any bands
+  var bandNames = monthlyAOD.bandNames();
+  var imageHasBands = bandNames.size().gt(0);
+
+  // If the image has no bands, skip this period
+  if (!imageHasBands.getInfo()) {
+    print('No data for', year, month);
+    return ee.FeatureCollection([]);
+  }
+
+  // Reproject to the defined CRS and scale, and clip to the boundary of the collection
+  monthlyAOD = monthlyAOD.reproject(crs, null, scale).clip(collection);
+
+  // Reduce the data by the collection and calculate mean AOD
+  var stats = monthlyAOD.reduceRegions({
+    collection: collection,
+    reducer: ee.Reducer.mean(),
+    scale: scale, // Ensure the scale is used correctly
+    crs: crs // Ensure the CRS is specified
+  });
+
+  // Add year and month information
+  stats = stats.map(function(feature) {
+    return feature.set('year', year)
+                  .set('month', month)
+                  .set('property', feature.get(property))
+                  .set('mean_aod', feature.get('mean'));
+  });
+
+  return stats;
+};
+
+// Loop through each year and export data separately
+for (var year = startYear; year <= endYear; year++) {
+  var results_regions = ee.FeatureCollection([]);
+  var results_districts = ee.FeatureCollection([]);
+
+  for (var month = 1; month <= 12; month++) {
+    var monthlyStatsRegions = calculateMonthlyMeanAOD(year, month, regions, 'NAME_1');
+    var monthlyStatsDistricts = calculateMonthlyMeanAOD(year, month, districts, 'NAME_2');
+    results_regions = results_regions.merge(monthlyStatsRegions);
+    results_districts = results_districts.merge(monthlyStatsDistricts);
+  }
+
+  // Export the results as CSV files for regions
+  Export.table.toDrive({
+    collection: results_regions,
+    description: 'Monthly_Mean_AOD_Regions_Angola_' + year,
+    selectors: ['property', 'year', 'month', 'mean_aod'],
+    fileFormat: 'CSV',
+    folder: 'Angola_AOD'
+  });
+
+  // Export the results as CSV files for districts
+  Export.table.toDrive({
+    collection: results_districts,
+    description: 'Monthly_Mean_AOD_Districts_Angola_' + year,
+    selectors: ['property', 'year', 'month', 'mean_aod'],
+    fileFormat: 'CSV',
+    folder: 'Angola_Dust'
+  });
+}
