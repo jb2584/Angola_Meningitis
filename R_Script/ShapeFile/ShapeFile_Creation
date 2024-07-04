@@ -1,0 +1,84 @@
+########################### ANGOLA MAP ###################################
+    
+    ### District level map
+
+    angola_shape_district <- st_read("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Shape_File/District")
+    angola_bbox_district <- st_bbox(angola_shape_district)
+    angola_extent <- st_as_sfc(angola_bbox_district)
+    angola_extent <- as(angola_extent, "Spatial")
+    
+    angola_districts <- st_transform(angola_shape_district, crs = 4326) #4326 is required becausue longitude and latitude 
+    district_centroids <- st_centroid(angola_shape_district)
+    district_centroids_df <- data.frame(st_coordinates(district_centroids))
+    district_centroids_df$NAME_2 <- angola_districts$NAME_2
+  
+     
+    #Plot district map
+      ggplot(data = angola_shape_district) +
+        geom_sf(color = "black", fill = "lightgray", size = 0.25) +  # Uniform fill color, black borders
+        geom_sf_text(aes(label = NAME_2), check_overlap = TRUE, size = 3, color = "black") +  # Label districts
+        labs(title = "Map of Angola", subtitle = "Districts of Angola") +
+        theme_minimal() +
+        theme(legend.position = "none")
+     
+    ### Regional level map
+      
+      angola_shape_region <- st_read("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Shape_File/Region")
+    
+      angola_regions <- st_transform(angola_shape_region, crs = 4326) #4326 is required becausue longitude and latitude 
+      region_centroids <- st_centroid(angola_regions)
+      region_centroids_df <- data.frame(
+        x = st_coordinates(region_centroids)[, 1],  # Longitude
+        y = st_coordinates(region_centroids)[, 2],  # Latitude
+        NAME_1 = angola_regions$NAME_1  # Make sure this matches the region names
+      )
+      
+      #Plot region map
+      ggplot(data = angola_regions) +
+        geom_sf(color = "black", fill = "lightgray", size = 0.25) +  # Draw the regions
+        geom_label_repel(
+          data = region_centroids_df,
+          aes(x = x, y = y, label = NAME_1),
+          size = 3,
+          color = "black",
+          fill = "white",  # Background color of the labels
+          box.padding = 0.5,  # Padding around the label
+          segment.color = "black",  # Color of the line connecting label and point
+          segment.size = 0.5,  # Thickness of the line
+          nudge_x = 0, nudge_y = 0.02  # Optional: nudge labels if needed for better placement
+        ) +
+        labs(title = "Map of Angola", subtitle = "Regions of Angola") +
+        theme_minimal() +
+        theme(legend.position = "none")
+      
+      #Convert Luanda Region into single district
+      luanda_geometry <- angola_regions[angola_regions$NAME_1 == "Luanda", "geometry"]
+      luanda_districts <- angola_districts[angola_districts$NAME_1 == "Luanda", ]
+      new_luanda_district <- luanda_districts %>%
+        summarise(
+          geometry = st_union(geometry),
+          # You can add more aggregation functions here for other attributes if needed
+          # For example, population = sum(population, na.rm = TRUE)
+          # Ensure to keep only necessary attributes
+          NAME_1 = "Luanda",
+          NAME_2 = "Luanda"
+        )
+      st_crs(new_luanda_district) <- st_crs(angola_districts)
+      angola_districts <- angola_districts[!(angola_districts$NAME_1 == "Luanda"), ]
+      angola_districts<- angola_districts %>%
+        select(NAME_1, NAME_2, geometry)
+      angola_districts <- rbind(angola_districts, new_luanda_district)
+      
+      #Rename Baia Farta
+      angola_districts<- angola_districts %>%
+        select(NAME_1, NAME_2, geometry) %>%
+        mutate(NAME_2 = if_else(NAME_2 == "Baía Farta", "Baia Farta", NAME_2))
+      
+     #This is to make the names work in google earth
+      output_path_regions <- "/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Shape_File/Updated/angola_regions_utf8.shp"
+      output_path_districts <- "/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Shape_File/Updated/angola_districts_utf8.shp"
+      
+      # Re-save the shapefiles with UTF-8 encoding
+      st_write(angola_regions, output_path_regions, layer_options = "ENCODING=UTF-8", delete_layer = TRUE)
+      st_write(angola_districts, output_path_districts, layer_options = "ENCODING=UTF-8", delete_layer = TRUE)
+      
