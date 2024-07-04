@@ -1,0 +1,41 @@
+// Define the time range
+var startYear = 2000;
+var endYear = 2023;
+
+// Define the geographical region: Angola
+var angola = ee.FeatureCollection('USDOS/LSIB_SIMPLE/2017')
+  .filter(ee.Filter.eq('country_na', 'Angola'));
+
+// Define the function to calculate yearly mean temperature
+var calculateYearlyMeanTemp = function(year) {
+  var startDate = ee.Date.fromYMD(year, 1, 1);
+  var endDate = startDate.advance(1, 'year');
+
+  // Filter the dataset for the specified year and area
+  var yearlyTemperature = ee.ImageCollection('ECMWF/ERA5_LAND/HOURLY')
+                            .filterDate(startDate, endDate)
+                            .filterBounds(angola)
+                            .select('temperature_2m')
+                            .mean()  // Calculate the mean temperature
+                            .clip(angola);  // Clip to the boundary of Angola
+
+  // Add the image to the map with visualization parameters
+  var visParams = {min: 280, max: 300, palette: ['blue', 'green', 'yellow', 'red']};
+  Map.addLayer(yearlyTemperature, visParams, 'Mean 2m Temperature ' + year);
+  
+  // Export the image, specifying scale and region
+  Export.image.toDrive({
+    image: yearlyTemperature,
+    description: 'Yearly_Mean_Temperature_2m_' + year,
+    folder: 'Angola_Temperature',
+    fileNamePrefix: 'Mean_2m_Temp_' + year,
+    scale: 1000,
+    region: angola.geometry(),
+    fileFormat: 'GeoTIFF'
+  });
+};
+
+// Apply the function for each year from 2000 to 2023
+for (var year = startYear; year <= endYear; year++) {
+  calculateYearlyMeanTemp(year);
+}
