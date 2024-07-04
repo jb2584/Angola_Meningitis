@@ -1,0 +1,84 @@
+// Define the time range
+var startYear = 2000;
+var endYear = 2023;
+
+// Load the uploaded shapefile for regions and districts
+var regions = ee.FeatureCollection('projects/angolaclimatemeningitis/assets/angola_regions_utf8');
+var districts = ee.FeatureCollection('projects/angolaclimatemeningitis/assets/angola_districts_utf8');
+
+// Define the CRS and scale
+var crs = 'EPSG:4326';
+var scale = 10000;
+
+// Function to calculate annual mean windspeed
+var calculateAnnualMeanWindspeed = function(year, collection, property) {
+  var startDate = ee.Date.fromYMD(year, 1, 1);
+  var endDate = ee.Date.fromYMD(year, 12, 31);
+
+  // Load the TerraClimate dataset for the specified year and area
+  var annualWindspeed = ee.ImageCollection('IDAHO_EPSCOR/TERRACLIMATE')
+                          .filterDate(startDate, endDate)
+                          .filterBounds(collection)
+                          .select('vs')
+                          .mean(); // Calculate the mean windspeed
+
+  // Check if the image has any bands
+  var bandNames = annualWindspeed.bandNames();
+  var imageHasBands = bandNames.size().gt(0);
+
+  // If the image has no bands, skip this period
+  if (!imageHasBands.getInfo()) {
+    print('No data for', year);
+    return ee.FeatureCollection([]);
+  }
+
+  // Reproject to the defined CRS and scale, and clip to the boundary of the collection
+  annualWindspeed = annualWindspeed.reproject(crs, null, scale).clip(collection);
+
+  // Reduce the data by the collection and calculate mean windspeed
+  var stats = annualWindspeed.reduceRegions({
+    collection: collection,
+    reducer: ee.Reducer.mean(),
+    scale: scale, // Ensure the scale is used correctly
+    crs: crs // Ensure the CRS is specified
+  });
+
+  // Add year information
+  stats = stats.map(function(feature) {
+    return feature.set('year', year)
+                  .set('property', feature.get(property))
+                  .set('mean_windspeed', feature.get('mean'));
+  });
+
+  return stats;
+};
+
+// Initialize empty FeatureCollections to store results for all years
+var all_years_results_regions = ee.FeatureCollection([]);
+var all_years_results_districts = ee.FeatureCollection([]);
+
+// Loop through each year and collect data
+for (var year = startYear; year <= endYear; year++) {
+  var annualStatsRegions = calculateAnnualMeanWindspeed(year, regions, 'NAME_1');
+  var annualStatsDistricts = calculateAnnualMeanWindspeed(year, districts, 'NAME_2');
+  all_years_results_regions = all_years_results_regions.merge(annualStatsRegions);
+  all_years_results_districts = all_years_results_districts.merge(annualStatsDistricts);
+}
+
+// Export the combined results as a single CSV file for regions
+Export.table.toDrive({
+  collection: all_years_results_regions,
+  description: 'Annual_Mean_Windspeed_Regions_Angola_2000_2023',
+  selectors: ['property', 'year', 'mean_windspeed'],
+  fileFormat: 'CSV',
+  folder: 'Angola_Windspeed'
+});
+
+// Export the combined results as a single CSV file for districts
+Export.table.toDrive({
+  collection: all_years_results_districts,
+  description: 'Annual_Mean_Windspeed_Districts_Angola_2000_2023',
+  selectors: ['property', 'year', 'mean_windspeed'],
+  fileFormat: 'CSV',
+  folder: 'Angola_Windspeed'
+});
