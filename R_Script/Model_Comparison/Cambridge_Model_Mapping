@@ -1,0 +1,65 @@
+#Cambridge Model#
+
+cambridge_prob <- read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Cambridge_Model/Angola.csv")
+
+
+# Rename columns in cambridge_prob for clarity
+cambridge_prob <- cambridge_prob %>%
+  rename(NAME_2 = NAME_2.x, risk_category = risk_category)
+
+# Merge the data frames
+angola_districts <- angola_districts %>%
+  mutate(risk_category = case_when(
+    NAME_2 == "Luanda" ~ "Very Low <0.2",
+    NAME_2 == "Baia Farta" ~ "Low <0.4",
+    TRUE ~ risk_category
+  ))
+
+# Set the order of risk categories
+angola_districts$risk_category <- factor(angola_districts$risk_category, 
+                                         levels = c("Very High ≥0.8", "High <0.8", "Moderate <0.6", "Low <0.4", "Very Low <0.2"))
+
+# Define color palette for risk categories
+risk_colors <- c("Very Low <0.2" = "white", "Low <0.4" = "yellow", "Moderate <0.6" = "orange", "High <0.8" = "red", "Very High ≥0.8" = "darkred")
+
+# Create the map
+ggplot() +
+  geom_sf(data = angola_districts, aes(fill = risk_category)) +
+  scale_fill_manual(values = risk_colors, name = "Risk Category") +
+  theme_minimal() +
+  labs(title = "Meningitis Risk Categories in Angolan Districts",
+       x = "",
+       y = "") +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    legend.position = "right",
+    panel.grid.major = element_blank(),  
+    panel.grid.minor = element_blank(),  
+    axis.title.x = element_blank(),      
+    axis.title.y = element_blank(),      
+    axis.text.x = element_blank(),       
+    axis.text.y = element_blank(),       
+    axis.ticks = element_blank()        
+  )
+
+# Create the new data frame with only district name and risk category
+angola_districts_risk <- angola_districts %>%
+  dplyr::select(NAME_2, risk_category)
+
+angola_districts_risk <- st_drop_geometry(angola_districts_risk)
+
+# Inspect column names to ensure they are correct
+colnames(angola_districts_risk)
+
+# Save the new data frame to a CSV file
+write.csv(angola_districts_risk, "/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Cambridge_Model/angola_districts_risk.csv", row.names = FALSE)
+
+view(angola_districts_risk)
+
+angola_districts %>%
+  group_by(risk_category) %>%
+  summarise(count = n())
+
+view(angola_districts_risk)
+# View the counts
+print(risk_category_counts)
