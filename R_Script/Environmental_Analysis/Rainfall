@@ -1,0 +1,349 @@
+
+################## PRECIPITATION ##########################
+
+###https://data.chc.ucsb.edu/products/CHIRPS-2.0/africa_monthly/tifs/
+
+####### Regional Analysis #########
+
+regional_annual_rain<-read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Precipitation/Annual_Data/GoogleEarth/YearlyPrecip_perRegion.csv")
+
+district_annual_rain<-read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Precipitation/Annual_Data/GoogleEarth/Precipitation_summary.csv")
+
+
+#Add rain to 2023 case data
+precip_2023 <- district_annual_rain %>%
+  filter(Year == 2023)
+
+district_case_data_2023 <- district_case_data_2023 %>%
+  left_join(precip_2023, by = c("NAME_2" = "District"))
+
+
+ggplot(data = district_case_data_2023) +
+  geom_sf(aes(fill = Mean_Precip), color = "white", size = 0.1) +  
+  scale_fill_gradient(low = "white", high = "navyblue", 
+                      name = "Mean Precipitation (mm)") +
+  labs(
+    title = "Mean Annual Precipitation per District in Angola, 2023"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",  
+    plot.title = element_text(size = 16, face = "bold"),  
+    plot.subtitle = element_text(size = 12),
+    panel.grid.major = element_blank(),  
+    panel.grid.minor = element_blank(), 
+    axis.text.x = element_blank(),  
+    axis.text.y = element_blank(), 
+    axis.ticks = element_blank()  
+  )
+
+# 4 year averages
+baseline_precip <- district_annual_rain %>%
+  filter(Year >= 2000 & Year <= 2003) %>%
+  group_by(District) %>%
+  summarize(Baseline_Precip = mean(Mean_Precip, na.rm = TRUE)) %>%
+  ungroup()
+
+avg_precip_4yr <- district_annual_rain %>%
+  mutate(
+    Period = cut(
+      Year, 
+      breaks = seq(2000, max(Year) + 1, by = 4), 
+      labels = c("2000-2003", "2004-2007", "2008-2011", "2012-2015", "2016-2019", "2020-2023"),
+      include.lowest = TRUE,
+      right = FALSE
+    )
+  ) %>%
+  group_by(District, Period) %>%
+  summarize(Avg_Precip = mean(Mean_Precip, na.rm = TRUE), .groups = 'drop') 
+
+avg_precip_4yr <- avg_precip_4yr %>%
+  left_join(baseline_precip, by = "District") %>%
+  mutate(Percent_Change = ((Avg_Precip - Baseline_Precip) / Baseline_Precip) * 100)
+
+angola_avg_precip_4yr_map <- angola_districts %>%
+  left_join(avg_precip_4yr, by = c("NAME_2" = "District")) %>%
+  filter(Period != "2000-2003") 
+
+angola_avg_precip_4yr_map <- angola_avg_precip_4yr_map %>%
+  filter(!is.na(Percent_Change) & !is.na(Period))
+
+ggplot(data = angola_avg_precip_4yr_map) +
+  geom_sf(aes(fill = Percent_Change), color = NA) +
+  scale_fill_gradient2(
+    low = "saddlebrown", 
+    mid = "white", 
+    high = "blue", 
+    midpoint = 0, 
+    name = "Percent Change in Rainfall"
+  ) +
+  facet_wrap(~ Period, nrow = 1) +  
+  labs(
+    title = "Percent Change in Precipitation from Baseline (2000-2003) per District",
+    subtitle = "Faceted by 4-Year Periods, in Angola"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(size = 10),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    panel.grid.major = element_blank(),  
+    panel.grid.minor = element_blank()   
+  )
+
+#Regional data
+
+#24 year average
+regional_annual_rain<-read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Precipitation/Annual_Data/GoogleEarth/YearlyPrecip_perRegion.csv")
+
+twenty_four_year_avg_precip <- regional_annual_rain %>%
+  filter(Year >= 2000 & Year <= 2023) %>%
+  group_by(Region) %>%
+  summarize(twenty_four_year_avg_precip = mean(Mean_Precip, na.rm = TRUE))
+
+angola_regions_precip <- angola_regions %>%
+  left_join(twenty_four_year_avg_precip, by = c("NAME_1" = "Region"))
+
+angola_regions_precip <- angola_regions_precip %>%
+  mutate(centroid_x = centroids[, 1], centroid_y = centroids[, 2])
+
+ggplot(data = angola_regions_precip) +
+  geom_sf(aes(fill = twenty_four_year_avg_precip), color = "lightgrey", size = 0.2) +
+  scale_fill_gradient(low = "white", high = "blue", name = "Mean Annual Rainfall (mm)") +
+  geom_text_repel(
+    aes(x = centroid_x, y = centroid_y, label = NAME_1), 
+    size = 3, 
+    color = "black", 
+    fontface = "bold",
+    max.overlaps = 20,
+    point.padding = unit(0.5, "lines"), 
+    segment.size = 0.5, 
+    segment.color = "black",
+    arrow = arrow(length = unit(0.01, "npc")),
+    force = 1,
+    nudge_x = 0,
+    nudge_y = 0
+  ) +
+  labs(
+    title = "24-Year Average Total Precipitation by Region in Angola (2000-2023)",
+    x = "",
+    y = ""
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+#Regional trends
+regions_ordered <- regional_annual_rain %>%
+  filter(Year == 2023) %>%
+  arrange(desc(Mean_Precip)) %>%
+  pull(Region)
+
+# Reorder the regions in the data frame
+regional_annual_rain <- regional_annual_rain %>%
+  mutate(Region = factor(Region, levels = regions_ordered))
+
+# Plot the total yearly precipitation for each region
+ggplot(regional_annual_rain, aes(x = Year, y = Mean_Precip, group = Region, color = Region)) +
+  geom_line() +
+  labs(
+    title = "Total Yearly Precipitation by Region in Angola (1994-2023)",
+    x = "Year",
+    y = "Total Precipitation (mm)"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+#4 yearly regional trends
+baseline_df <- regional_annual_rain %>%
+  filter(Year >= 2000 & Year <= 2003) %>%
+  group_by(Region) %>%
+  summarize(baseline_avg = mean(Mean_Precip, na.rm = TRUE))
+
+# Create a new column for four-year periods starting from 2000
+regional_annual_rain <- regional_annual_rain %>%
+  filter(Year >= 2000) %>%
+  mutate(Period = cut(Year, breaks = seq(2000, 2024, by = 4), right = FALSE, labels = FALSE))
+
+# Group by Region and Period, then calculate the mean precipitation for each group
+four_year_avg_precip <- regional_annual_rain %>%
+  group_by(Region, Period) %>%
+  summarize(Mean_Precip = mean(Mean_Precip, na.rm = TRUE), .groups = 'drop')
+
+# Create a more descriptive period label
+four_year_avg_precip <- four_year_avg_precip %>%
+  mutate(Period_Label = paste0((Period - 1) * 4 + 2000, "-", (Period - 1) * 4 + 2003))
+
+# Join with the baseline data to calculate the percentage change
+four_year_avg_precip <- four_year_avg_precip %>%
+  left_join(baseline_df, by = "Region") %>%
+  mutate(Change_Percent = ((Mean_Precip - baseline_avg) / baseline_avg) * 100)
+
+# Filter out NA periods
+four_year_avg_precip <- four_year_avg_precip %>%
+  filter(!is.na(Period))
+
+# Arrange the data for better readability
+four_year_avg_precip <- four_year_avg_precip %>%
+  arrange(Region, Period)
+
+# Print the result as a table
+print(four_year_avg_precip)
+
+
+# Weekly Data
+
+
+weekly_precip <- read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Precipitation/Weekly_Data/Weekly_Precip.csv")  
+
+weekly_precip_long <- weekly_precip %>%
+  pivot_longer(cols = starts_with("Week"), names_to = "Week", values_to = "Precipitation") %>%
+  mutate(Week = as.integer(sub("Week", "", Week)))  
+
+
+
+district_case_data_2023_weekly <- district_case_data_2023_weekly %>%
+  filter(Year == 2023)
+
+weekly_precip_long$NAME_2 <- weekly_precip_long$District 
+
+district_case_data_2023_weekly <- left_join(district_case_data_2023_weekly, weekly_precip_long, by = c("NAME_2", "Week"))
+
+weekly_totals <- district_case_data_2023_weekly %>%
+  group_by(Week) %>%
+  summarise(Total_Precipitation = sum(Precipitation, na.rm = TRUE),
+            Total_Cases = sum(Cases, na.rm = TRUE))
+
+max_precip <- max(weekly_totals$Total_Precipitation, na.rm = TRUE)
+max_cases <- max(weekly_totals$Total_Cases, na.rm = TRUE)
+
+scale_factor <- max_precip / max_cases
+
+ggplot(weekly_totals, aes(x = Week)) +
+  geom_line(aes(y = Total_Precipitation, color = "Total Precipitation"), size = 1.2) +
+  geom_smooth(aes(y = Total_Precipitation, color = "Total Precipitation"), method = "loess", se = FALSE, size = 1, linetype = "dashed") +
+  geom_line(aes(y = Total_Cases * scale_factor, color = "Total Cases"), size = 1.2) +
+  geom_smooth(aes(y = Total_Cases * scale_factor, color = "Total Cases"), method = "loess", se = FALSE, size = 1, linetype = "dashed") +
+  scale_y_continuous(
+    name = "Total Precipitation",
+    sec.axis = sec_axis(~./scale_factor, name = "Total Cases")
+  ) +
+  labs(
+    title = "Total Precipitation and Total Cases by Week",
+    x = "Week of the 2023",
+    y = "Total Precipitation",
+    color = "Legend"
+  ) +
+  scale_color_manual(values = c("blue", "blue", "darkred", "darkred"), 
+                     labels = c("Total Precipitation", "Smoothed Precipitation", "Total Cases", "Smoothed Cases")) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "bottom",
+    axis.title.y = element_text(color = "black"),
+    axis.text.y = element_text(color = "black"),
+    axis.title.y.right = element_text(color = "black"),
+    axis.text.y.right = element_text(color = "black"),
+    axis.title.x = element_text(size = 12),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+#Seasonal Analysis - Monthly 
+monthly_district_annual_rain<-read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Precipitation/Monthly_Data/monthly_regions_rain.csv")
+
+# Calculate the average monthly precipitation for each region over the 24 years
+avg_monthly_precip_regions <- monthly_district_annual_rain %>%
+  group_by(Region, Month) %>%
+  summarize(Avg_Monthly_Precip = mean(Mean_Precip, na.rm = TRUE)) %>%
+  ungroup()
+
+# Create a factor for month to ensure correct order in the plot
+avg_monthly_precip_regions <- avg_monthly_precip_regions %>%
+  mutate(Month = factor(Month, levels = 1:12, labels = month.abb))
+
+# Order the regions by their average December precipitation
+regions_ordered <- avg_monthly_precip_regions %>%
+  filter(Month == "Dec") %>%
+  arrange(desc(Avg_Monthly_Precip)) %>%
+  pull(Region)
+
+# Reorder the factor levels of 'Region' based on the December average
+avg_monthly_precip_regions <- avg_monthly_precip_regions %>%
+  mutate(Region = factor(Region, levels = regions_ordered))
+
+# Plot the 24-year average monthly precipitation by region
+ggplot(avg_monthly_precip_regions, aes(x = Month, y = Avg_Monthly_Precip, color = Region, group = Region)) +
+  geom_line() +
+  labs(
+    title = "24-Year Average Monthly Precipitation by Region in Angola (2000-2023)",
+    x = "Month",
+    y = "Average Monthly Precipitation (mm)",
+    color = "Region"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+#Linear Regression
+district_monthly_rain <-read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Precipitation/Monthly_Data/Monthly_District_Rain.csv")
+head(district_monthly_rain)
+
+# Convert date column
+district_monthly_rain <- district_monthly_rain %>%
+  mutate(date = as.Date(paste(Year, Month, "01", sep = "-"), format = "%Y-%m-%d"))
+
+# Calculate the annual average rainfall
+district_annual_rain <- district_monthly_rain %>%
+  group_by(District, Year) %>%
+  summarize(mean_annual_rain = mean(Mean_Precip, na.rm = TRUE)) %>%
+  ungroup()
+
+# Calculate the country-level annual average rainfall
+country_annual_rain <- district_annual_rain %>%
+  group_by(Year) %>%
+  summarize(mean_annual_rain = mean(mean_annual_rain, na.rm = TRUE)) %>%
+  ungroup()
+
+# Fit the linear model
+model <- lm(mean_annual_rain ~ Year, data = country_annual_rain)
+
+# Plot histogram of annual average rainfall
+hist(country_annual_rain$mean_annual_rain, main = "Histogram of Mean Annual Rainfall", xlab = "Mean Annual Rainfall (mm)")
+
+# Q-Q plot for residuals
+qqnorm(residuals(model))
+qqline(residuals(model), col = "blue")
+
+# Compute and print kurtosis and skewness
+cat("Kurtosis:", moments::kurtosis(residuals(model)), "\n")
+cat("Skewness:", moments::skewness(residuals(model)), "\n")
+
+# Summary of the model
+summary(model)
+
+# Extract coefficients and calculate 24-year difference
+coefficient <- summary(model)$coefficients[2, 1] 
+conf_int <- confint(model)[2, ] 
+
+# Number of years in 24 years
+years <- 24
+
+# Calculate 24-year difference
+estimate_24yr <- coefficient * years
+conf_low_24yr <- conf_int[1] * years
+conf_high_24yr <- conf_int[2] * years
+
+# Print results
+cat("24-year estimated rainfall change:", estimate_24yr, "mm\n")
+cat("95% Confidence Interval: [", conf_low_24yr, ",", conf_high_24yr, "] mm\n")
