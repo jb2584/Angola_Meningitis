@@ -1,0 +1,242 @@
+library(moments)
+library(dplyr)
+library(ggplot2)
+library(sf)
+library(ggrepel)
+library(readr)
+
+
+#Monthly Data
+
+#Regional
+monthly_vapour_pressure_data_regions <- read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Vapour_Pressure/Monthly_Data/Monthly_Mean_Vapor_Pressure_Regions_Angola_2000_2023.csv")
+monthly_temperature_data_regions <- read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Temperature/Monthly_Data/Monthly_Mean_Temperature_Regions_Angola_2000_2023.csv")
+
+monthly_humidity_data_regions <- monthly_vapour_pressure_data_regions %>%
+  inner_join(monthly_temperature_data_regions, by = c("property", "year", "month"))
+
+# Adjust vapor pressure units and calculate Absolute Humidity
+monthly_humidity_data_regions <- monthly_humidity_data_regions %>%
+  mutate(mean_vapor_pressure = mean_vapor_pressure * 1000,
+         absolute_humidity = mean_vapor_pressure / (461.5 * mean_temperature))
+
+write.csv(monthly_humidity_data_regions,"/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Humidity/Monthly_Mean_Humidity_Regions_Angola_2000_2023.csv" )
+
+#Districts
+
+monthly_vapour_pressure_data_districts <- read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Vapour_Pressure/Monthly_Data/Monthly_Mean_Vapor_Pressure_Districts_Angola_2000_2023.csv")
+monthly_temperature_data_districts <- read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Temperature/Monthly_Data/Monthly_Mean_Temperature_Districts_Angola_2000_2023.csv")
+
+monthly_humidity_data_districts <- monthly_vapour_pressure_data_districts %>%
+  inner_join(monthly_temperature_data_districts, by = c("property", "year", "month"))
+
+# Adjust vapor pressure units and calculate Absolute Humidity
+monthly_humidity_data_districts <- monthly_humidity_data_districts %>%
+  mutate(mean_vapor_pressure = mean_vapor_pressure * 1000,
+         absolute_humidity = mean_vapor_pressure / (461.5 * mean_temperature))
+
+write.csv(monthly_humidity_data_districts,"/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Humidity/Monthly_Mean_Humidity_Districts_Angola_2000_2023.csv" )
+
+# Calculate 24-year average monthly absolute humidity
+avg_monthly_humidity_regions <- monthly_humidity_data_regions %>%
+  group_by(property, month) %>%
+  summarize(Avg_Monthly_Humidity = mean(absolute_humidity, na.rm = TRUE)) %>%
+  ungroup()
+
+# Create a factor for month to ensure correct order in the plot
+avg_monthly_humidity_regions <- avg_monthly_humidity_regions %>%
+  mutate(month = factor(month, levels = 1:12, labels = month.abb))
+
+# Order the regions by their average December humidity
+regions_ordered <- avg_monthly_humidity_regions %>%
+  filter(month == "Dec") %>%
+  arrange(desc(Avg_Monthly_Humidity)) %>%
+  pull(property)
+
+# Reorder the factor levels of 'property' based on the December average
+avg_monthly_humidity_regions <- avg_monthly_humidity_regions %>%
+  mutate(property = factor(property, levels = regions_ordered))
+
+# Plot the 24-year average monthly absolute humidity by region
+ggplot(avg_monthly_humidity_regions, aes(x = month, y = Avg_Monthly_Humidity, color = property, group = property)) +
+  geom_line() +
+  labs(
+    title = "24-Year Average Monthly Absolute Humidity by Region in Angola (2000-2023)",
+    x = "Month",
+    y = "Mean Monthly Absolute Humidity (g/m³)",
+    color = "Region"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+#24 year average
+
+# Aggregate data to regional level
+humidity_summary_regional <- humidity_summary %>%
+  left_join(angola_districts, by = c("District" = "NAME_2")) %>%
+  group_by(NAME_1, Year) %>%
+  summarize(Mean_Hum = mean(Mean_Hum, na.rm = TRUE)) %>%
+  rename(Region = NAME_1)
+
+# Calculate 24-year average absolute humidity for each region
+twenty_four_year_avg_humidity <- humidity_summary_regional %>%
+  filter(Year >= 2000 & Year <= 2023) %>%
+  group_by(Region) %>%
+  summarize(Twenty_Four_Year_Avg_Humidity = mean(Mean_Hum, na.rm = TRUE))
+
+# Merge with spatial data
+angola_regions_humidity <- angola_regions %>%
+  left_join(twenty_four_year_avg_humidity, by = c("NAME_1" = "Region"))
+
+# Calculate centroid coordinates for labeling
+angola_regions_humidity <- angola_regions_humidity %>%
+  mutate(centroid = st_centroid(geometry),
+         centroid_x = st_coordinates(centroid)[,1],
+         centroid_y = st_coordinates(centroid)[,2])
+
+# Plot the 24-year average absolute humidity on a map
+ggplot(data = angola_regions_humidity) +
+  geom_sf(aes(fill = Twenty_Four_Year_Avg_Humidity), color = "lightgrey", size = 0.2) +
+  scale_fill_gradient(low = "white", high = "red", name = "Mean Absolute Humidity (g/m³)") +
+  geom_text_repel(
+    aes(x = centroid_x, y = centroid_y, label = NAME_1), 
+    size = 3, 
+    color = "black", 
+    fontface = "bold",
+    max.overlaps = 20,
+    point.padding = unit(0.5, "lines"), # Adjust padding if needed
+    segment.size = 0.5, 
+    segment.color = "black",
+    arrow = arrow(length = unit(0.01, "npc")),
+    force = 1,
+    nudge_x = 0,
+    nudge_y = 0
+  ) +
+  labs(
+    title = "24-Year Average Absolute Humidity by Region in Angola (2000-2023)",
+    x = "",
+    y = ""
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+#4 year district averages
+
+# Filter out years before 2000
+humidity_summary <- humidity_summary %>%
+  filter(Year >= 2000)
+
+# Calculate the baseline average for 2000-2003
+baseline_hum <- humidity_summary %>%
+  filter(Year >= 2000 & Year <= 2003) %>%
+  group_by(District) %>%
+  summarize(Baseline_Hum = mean(Mean_Hum, na.rm = TRUE)) %>%
+  ungroup()
+
+# Calculate averages for each four-year period starting from 2000
+avg_hum_4yr <- humidity_summary %>%
+  mutate(
+    Period = cut(
+      Year, 
+      breaks = seq(2000, max(Year) + 1, by = 4), 
+      labels = c("2000-2003", "2004-2007", "2008-2011", "2012-2015", "2016-2019", "2020-2023"),
+      include.lowest = TRUE,
+      right = FALSE
+    )
+  ) %>%
+  group_by(District, Period) %>%
+  summarize(Avg_Hum = mean(Mean_Hum, na.rm = TRUE), .groups = 'drop') 
+
+avg_hum_4yr <- avg_hum_4yr %>%
+  left_join(baseline_hum, by = "District") %>%
+  mutate(Percent_Change = ((Avg_Hum - Baseline_Hum) / Baseline_Hum) * 100)
+
+angola_avg_hum_4yr_map <- angola_districts %>%
+  left_join(avg_hum_4yr, by = c("NAME_2" = "District")) %>%
+  filter(Period != "2000-2003") 
+
+angola_avg_hum_4yr_map <- angola_avg_hum_4yr_map %>%
+  filter(!is.na(Percent_Change) & !is.na(Period))
+
+# Plotting the change
+ggplot(data = angola_avg_hum_4yr_map) +
+  geom_sf(aes(fill = Percent_Change), color = NA) +
+  scale_fill_gradient2(
+    low = "blue", 
+    mid = "white", 
+    high = "red", 
+    midpoint = 0, 
+    name = "Percent Change in Humidity"
+  ) +
+  facet_wrap(~ Period, nrow = 1) +  # Display all periods on one row
+  labs(
+    title = "Percent Change in Humidity from Baseline (2000-2003) per District",
+    subtitle = "Faceted by 4-Year Periods, in Angola"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(size = 10),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    panel.grid.major = element_blank(),  # Remove major grid lines
+    panel.grid.minor = element_blank()   # Remove minor grid lines
+  )
+
+#Linear Regression
+# Load data
+district_monthly_humidity <- read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Humidity/Monthly_Mean_Humidity_Districts_Angola_2000_2023.csv")
+head(district_monthly_humidity)
+## Convert date column
+district_monthly_humidity <- district_monthly_humidity %>%
+  mutate(date = as.Date(paste(year, month, "01", sep = "-"), format = "%Y-%m-%d"))
+
+# Calculate the district average absolute humidity
+district_avg_humidity <- district_monthly_humidity %>%
+  group_by(date) %>%
+  summarize(mean_absolute_humidity = mean(absolute_humidity, na.rm = TRUE))
+
+# Plot histogram of average absolute humidity
+hist(district_avg_humidity$mean_absolute_humidity, main = "Histogram of Mean Absolute Humidity", xlab = "Mean Absolute Humidity")
+
+# Fit the linear model
+model <- lm(mean_absolute_humidity ~ date, data = district_avg_humidity)
+
+# Q-Q plot for residuals
+qqnorm(residuals(model))
+qqline(residuals(model), col = "blue")
+
+# Compute and print kurtosis and skewness
+cat("Kurtosis:", moments::kurtosis(residuals(model)), "\n")
+cat("Skewness:", moments::skewness(residuals(model)), "\n")
+
+# Summary of the model
+summary(model)
+
+# Extract coefficients and calculate 24-year difference
+coefficient <- summary(model)$coefficients[2, 1] # Extract the slope (date coefficient)
+conf_int <- confint(model)[2, ] # Extract confidence interval for the slope
+
+# Number of days in 24 years (approximately)
+days_24_years <- 24 * 365.25
+
+# Calculate 24-year difference
+estimate_24yr <- coefficient * days_24_years
+conf_low_24yr <- conf_int[1] * days_24_years
+conf_high_24yr <- conf_int[2] * days_24_years
+
+# Print results
+cat("24-year estimated absolute humidity change:", estimate_24yr, "\n")
+cat("95% Confidence Interval: [", conf_low_24yr, ",", conf_high_24yr, "]\n")
