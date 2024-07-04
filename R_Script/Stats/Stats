@@ -1,0 +1,436 @@
+library(ggcor)
+library(ggcorrplot)
+library(ggplot2)
+library(ggcorrplot)
+library(lme4)
+library(Matrix)
+library(lme4)
+library(dplyr)
+library(broom)
+library(sjPlot)
+library(texreg)
+
+
+
+##### Load Environmental Data ####
+angola_districts
+district_monthly_temp <-read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Temperature/Monthly_Data/Monthly_Mean_Temperature_Districts_Angola_2000_2023.csv")
+district_monthly_rain <-read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Precipitation/Monthly_Data/Monthly_District_Rain.csv")
+district_monthly_humidity <-read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Humidity/Monthly_Mean_Humidity_Districts_Angola_2000_2023.csv")
+district_monthly_wind <- read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Wind_Speed/Monthly/Combined_Monthly_Mean_Wind_Districts_Angola_2000_2023.csv")
+district_monthly_dust<-read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Dust/Monthly/Combined_Monthly_Mean_AOD_Districts_Angola_2000_2023.csv")
+district_monthly_NDVI <-read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Land_Cover/NDVI_Data/Monthly/Combined_Monthly_Mean_NDVI_Districts_Angola_2000_2023.csv")
+district_2020_pop_density <-read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Population_Density/Population_Density_2020.csv")
+district_weekly_cases <-read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Epi_Data/District_Weekly_Epi.csv")
+district_monthly_cases<-read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Epi_Data/Monthly_Data/district_monthly_data.csv")
+district_population <- read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Population_Count/Yearly/Population_Data_Districts_Angola_2000_2020.csv")
+district_molesworth_prob <- read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Molesworth/angola_districts_molesworth.csv")
+district_cam_prob <- read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Cambridge_Model/angola_districts_risk.csv")
+
+#Standardising of tables
+  #Temp
+  district_monthly_temp <- district_monthly_temp %>%
+  rename(NAME_2 = property)
+  district_monthly_temp <- district_monthly_temp %>%
+  rename(Year = year, Month = month)
+  district_monthly_temp <- district_monthly_temp %>%
+  mutate(mean_temperature = mean_temperature - 273.15)
+
+  #Rain
+  district_monthly_rain <- district_monthly_rain %>%
+  rename(NAME_2 = District)
+  
+
+  #Humidity
+  district_monthly_humidity <- district_monthly_humidity %>%
+  rename(NAME_2 = property)
+  district_monthly_humidity <- district_monthly_humidity %>%
+  rename(Year = year, Month = month)
+
+  #Wind
+  district_monthly_wind<- district_monthly_wind %>%
+  rename(NAME_2 = property)
+  district_monthly_wind <- district_monthly_wind %>%
+  rename(Year = year, Month = month)
+  district_monthly_wind <- district_monthly_wind %>%
+  mutate(mean_wind = mean_wind/100)
+
+  #NDVI
+  district_monthly_NDVI <- district_monthly_NDVI %>%
+  rename(NAME_2 = property)
+  district_monthly_NDVI <- district_monthly_NDVI %>%
+  rename(Year = year, Month = month)
+  district_monthly_NDVI <- district_monthly_NDVI %>%
+    mutate(mean_ndvi = mean_ndvi/10000)
+
+  #Dust
+  district_monthly_dust <- district_monthly_dust %>%
+  rename(NAME_2 = property)
+  district_monthly_dust <- district_monthly_dust %>%
+  rename(Year = year, Month = month)
+  district_monthly_dust <- district_monthly_dust %>%
+    mutate(mean_aod = mean_aod/1000)
+
+  #Population Density
+  district_2020_pop_density <- district_2020_pop_density %>%
+  rename(NAME_2 = District)
+
+  #Population
+  district_population <- district_population %>%
+  rename(NAME_2 = property)
+  district_population <- district_population %>%
+  rename(Year = year)
+  district_2020_population <- district_population %>%
+  filter(Year == 2020) %>%
+  dplyr::select(NAME_2, total_population)
+  
+
+##### Combined data ####
+district_monthly_epi_env <- district_monthly_cases %>%
+  left_join(district_monthly_temp, by = c("NAME_2", "Year", "Month")) %>%
+  left_join(district_monthly_rain, by = c("NAME_2", "Year", "Month")) %>%
+  left_join(district_monthly_humidity, by = c("NAME_2", "Year", "Month")) %>%
+  left_join(district_monthly_wind, by = c("NAME_2", "Year", "Month")) %>%
+  left_join(district_monthly_dust, by = c("NAME_2", "Year", "Month")) %>%
+  left_join(district_monthly_NDVI, by = c("NAME_2", "Year", "Month")) %>%
+  left_join(district_2020_pop_density, by = "NAME_2") %>%
+  left_join(district_molesworth_prob,by="NAME_2") %>%
+  left_join(district_cam_prob,by= "NAME_2") %>%
+    left_join(district_2020_population, by="NAME_2")
+
+district_monthly_epi_env <- district_monthly_epi_env %>%
+  dplyr::select(-mean_temperature.y,-X, -X.x, -X.y, -mean_vapor_pressure)
+
+district_monthly_epi_env <- district_monthly_epi_env %>%
+  rename(
+    Mean_temp = mean_temperature.x,
+    Mean_rain = Mean_Precip,
+    Mean_humidity = absolute_humidity,
+    Mean_wind = mean_wind,
+    Mean_AOD = mean_aod,
+    Mean_NDVI = mean_ndvi,
+    Total_Pop = total_population
+  )
+district_monthly_epi_env$Attack_Rate <- district_monthly_epi_env$Cases/district_monthly_epi_env$Total_Pop
+district_monthly_epi_env_2023 <- district_monthly_epi_env %>%
+  filter(Year == 2023)
+
+head(district_monthly_epi_env_2023)
+
+#### Descriptive analysis
+
+#Distribution of input variables
+hist(district_monthly_epi_env_2023$Mean_temp)
+
+
+hist(district_monthly_epi_env_2023$Cases)
+mean(district_monthly_epi_env_2023$Cases)
+var(district_monthly_epi_env_2023$Cases)
+
+#Plot histogram
+ggplot(district_monthly_epi_env_2023, aes(x=Cases)) +
+  geom_histogram(binwidth=2, fill="lightgrey", color="black", alpha=1) +
+  labs(title="",
+       x="Cases per District per Month in 2023",
+       y="Frequency") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust=0.5, size=15),
+    axis.title.x = element_text(size=12),
+    axis.title.y = element_text(size=12),
+    axis.text = element_text(size=10)
+  )
+
+#Check Colinearity
+vif_model <- lm(Cases ~ Mean_temp + Mean_rain + Mean_humidity + Mean_wind + Mean_AOD + Mean_NDVI + Mean_PopDensity, data = district_monthly_epi_env_2023)
+vif_values <- vif(vif_model)
+print(vif_values)
+
+vif_df <- data.frame(
+  `Variable` = names(vif_values),
+  VIF = round(vif_values, 2)
+)
+
+# Create and format the flextable
+vif_flextable <- flextable(vif_df) %>%
+  theme_vanilla() %>%
+  autofit() %>%
+  align(align = "center", part = "all") %>%
+  colformat_double(digits = 2)
+
+# Print the flextable
+vif_flextable
+
+
+#Pearson's Corrleation
+
+#Check Individual Correlations
+env_variables <- district_monthly_epi_env_2023 %>%
+  select(Mean_temp, Mean_rain, Mean_humidity, Mean_wind, Mean_AOD, Mean_NDVI, Mean_PopDensity) %>%
+  na.omit()
+cor_results <- rcorr(as.matrix(env_variables), type = "spearman")
+
+# Extract correlation coefficients
+cor_matrix <- cor_results$r
+print(cor_matrix)
+# Extract p-values
+p_matrix <- cor_results$P
+
+# Compute the correlation matrix of the predictors
+cor_matrix <- cor(district_monthly_epi_env_2023[, c("Mean_temp", "Mean_rain", "Mean_humidity", "Mean_wind", "Mean_AOD", "Mean_NDVI", "Mean_PopDensity")])
+ggcorrplot(formatted_matrix, 
+           method = "square", 
+           type = "lower",
+           lab = TRUE, 
+           lab_size = 3, 
+           title = "Correlation Matrix",
+           colors = c("red","white", "red"), 
+           legend.title = "Correlation
+Coefficient") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.text.y = element_text(hjust = 1))
+
+
+# Calculate the Spearman's rank correlation matrix along with p-values
+cor_results <- rcorr(as.matrix(district_monthly_epi_env_2023[, c("Mean_temp", "Mean_rain", "Mean_humidity", "Mean_wind", "Mean_AOD", "Mean_NDVI", "Mean_PopDensity")]), type = "spearman")
+
+# Extract the correlation coefficients and p-values
+cor_matrix <- cor_results$r
+p_matrix <- cor_results$P
+
+# Function to add asterisks to significant p-values
+add_asterisks <- function(cor, p) {
+  ifelse(p < 0.05, paste0(round(cor, 2), "*"), round(cor, 2))
+}
+
+formatted_matrix <- matrix(ncol = ncol(cor_matrix), nrow = nrow(cor_matrix))
+for (i in 1:nrow(cor_matrix)) {
+  for (j in 1:ncol(cor_matrix)) {
+    formatted_matrix[i, j] <- add_asterisks(cor_matrix[i, j], p_matrix[i, j])
+  }
+}
+
+# Remove the "Mean_" prefix and capitalize the variable names
+var_names <- toupper(sub("Mean_", "", rownames(cor_matrix)))
+
+# Set the row and column names
+rownames(formatted_matrix) <- var_names
+colnames(formatted_matrix) <- var_names
+
+# Convert to a data frame for better printing
+formatted_df <- as.data.frame(formatted_matrix, stringsAsFactors = FALSE)
+
+# Print the table in a way that is easily copyable to Excel
+write.table(formatted_df, "clipboard", sep = "\t", row.names = TRUE, col.names = NA)
+
+#Statistical Modelling
+
+#Creating Model
+
+    #Linear Associations
+    lm_temp<-lm(Attack_Rate ~ Mean_temp, data = district_monthly_epi_env_2023)
+    summary(lm_temp)
+    lm_rain<- lm(Attack_Rate ~ Mean_rain, data = district_monthly_epi_env_2023)
+    summary(lm_rain)
+    lm_humidity <-lm(Attack_Rate ~ Mean_humidity, data = district_monthly_epi_env_2023)
+    summary(lm_humidity)
+    lm_wind <-lm(Attack_Rate ~ Mean_wind, data = district_monthly_epi_env_2023)
+    summary(lm_wind)
+    lm_dust <-lm(Attack_Rate ~ Mean_AOD, data = district_monthly_epi_env_2023)
+    summary(lm_dust)
+    lm_NDVI <-lm(Attack_Rate ~ Mean_NDVI, data = district_monthly_epi_env_2023)
+    summary(lm_NDVI)
+      lm_PopDensity <- lm(Attack_Rate ~ Mean_PopDensity, data = district_monthly_epi_env_2023)
+    summary(lm_PopDensity)
+
+head(district_monthly_epi_env_2023)
+
+#Fit a Poisson Regression model
+poisson_model <- glm(Cases ~ Mean_temp + Mean_rain + Mean_humidity + Mean_wind + Mean_AOD + Mean_NDVI + Mean_PopDensity, 
+                     family = poisson, data = district_monthly_epi_env_2023)
+
+# Summary of the model
+summary(poisson_model)
+
+# Calculate residual deviance and degrees of freedom
+residual_deviance <- poisson_model$deviance
+degrees_freedom <- poisson_model$df.residual
+
+# Print residual deviance and degrees of freedom
+cat("Residual Deviance:", residual_deviance, "\n")
+cat("Degrees of Freedom:", degrees_freedom, "\n")
+
+# Check for overdispersion
+if (residual_deviance > degrees_freedom) {
+  cat("Overdispersion is present. Consider fitting a Negative Binomial model or a Zero-Inflated model.\n")
+} else {
+  cat("No overdispersion detected.\n")
+}
+
+#Confirm overdispersion
+hist(district_monthly_epi_env_2023$Cases)
+var(district_monthly_epi_env_2023$Cases)/mean(district_monthly_epi_env_2023$Cases)
+
+
+
+### Fit the negative binomial mixed-effects model
+
+  district_monthly_epi_env_2023$NAME_2 <- as.factor(district_monthly_epi_env_2023$NAME_2)
+
+  district_monthly_epi_env_2023_standardized <- district_monthly_epi_env_2023 %>%
+  mutate(across(c(Mean_temp, Mean_rain, Mean_humidity, Mean_wind, Mean_AOD, Mean_NDVI, Mean_PopDensity), scale))
+
+  head(district_monthly_epi_env_2023)
+
+  # Fit the model again
+  glmer_model1 <- glmer(cbind(Cases, Total_Pop - Cases) ~ Mean_temp + Mean_rain + Mean_humidity + Mean_wind + Mean_AOD + Mean_NDVI + Mean_PopDensity + 
+                          (1 | NAME_2),  # Random intercept for each district
+                        data = district_monthly_epi_env_2023, 
+                        family = binomial)
+  
+  district_monthly_epi_env_2023$Mean_NDVI <- (district_monthly_epi_env_2023$Mean_NDVI)*100
+  
+  # Display the summary of the model
+  
+ summary(glmer_model1)
+
+  glmer_nb_model_1 <- glmer.nb(Cases ~ Mean_temp + Mean_rain + Mean_humidity + Mean_NDVI + Mean_wind  + Mean_AOD + log(Mean_PopDensity) + offset(log(Total_Pop)) + (1 | NAME_2), 
+                                  data = district_monthly_epi_env_2023)
+  
+  summary(glmer_nb_model_1) #AIC 1154 #like =-567.4
+  tidy(glmer_nb_model_1)
+  screenreg(glmer_nb_model_1)
+  
+
+  #Remove dust
+  glmer_nb_model_2 <- glmer.nb(Cases ~ Mean_rain + Mean_humidity + Mean_NDVI + Mean_wind + log(Mean_PopDensity) +offset(log(Total_Pop)) + (1 | NAME_2), 
+                             data = district_monthly_epi_env_2023)
+  summary(glmer_nb_model_2) #AIC 1152 #Lik -567.8
+
+  #Remove wind
+  glmer_nb_model_3 <-glmer.nb(Cases ~ Mean_rain + Mean_humidity + Mean_NDVI + log(Mean_PopDensity) +offset(log(Total_Pop)) + (1 | NAME_2), 
+                              data = district_monthly_epi_env_2023)
+  summary(glmer_nb_model_3) #AIC 1150.8 #Lik -568.4
+  vif(glmer_nb_model_3)
+  
+  #Remove rain
+  glmer_nb_model_4 <- glmer.nb(Cases ~ Mean_humidity + Mean_NDVI + log(Mean_PopDensity) +offset(log(Total_Pop)) + (1 | NAME_2), 
+                               data = district_monthly_epi_env_2023)
+  summary(glmer_nb_model_4) #AIC 1151.2
+  
+  #Remove humidity
+  glmer_nb_model_5 <- glmer.nb(Cases ~ Mean_rain + Mean_NDVI + log(Mean_PopDensity) +offset(log(Total_Pop)) + (1 | NAME_2), 
+                               data = district_monthly_epi_env_2023)
+  summary(glmer_nb_model_5) #AIC 1152.2
+  
+  #Remove NDVI
+  glmer_nb_model_6 <- glmer.nb(Cases ~ Mean_NDVI + log(Mean_PopDensity) + offset(log(Total_Pop)) + (1 | NAME_2), 
+                               data = district_monthly_epi_env_2023)
+  summary(glmer_nb_model_6)
+  tab_model(glmer_nb_model_6)
+  screenreg(glmer_nb_model_6)
+  
+  #Test Interactions
+  
+  #Rescale Variables
+  district_monthly_epi_env_2023$Mean_humidity_scaled <- scale(district_monthly_epi_env_2023$Mean_humidity)
+  district_monthly_epi_env_2023$Mean_rain_scaled <- scale(district_monthly_epi_env_2023$Mean_rain)
+  district_monthly_epi_env_2023$Mean_PopDensity_scaled <- scale(log(district_monthly_epi_env_2023$Mean_PopDensity))
+  district_monthly_epi_env_2023$Total_Pop_scaled <- scale(log(district_monthly_epi_env_2023$Total_Pop))
+  
+  glmer_nb_model_7 <- glmer.nb(Cases ~ Mean_NDVI + Mean_rain_scaled * Mean_humidity_scaled * Mean_temp+ Mean_PopDensity_scaled + offset(Total_Pop_scaled) + (1 | NAME_2), 
+                               data = district_monthly_epi_env_2023)
+  
+  summary(glmer_nb_model_7)
+  
+  #Tester
+  glmer_nb_model_6 <- glmer.nb(Cases ~ Mean_humidity*Mean_rain + log(Mean_PopDensity) +offset(log(Total_Pop)) + (1 | NAME_2), 
+                               data = district_monthly_epi_env_2023)
+  summary(glmer_nb_model_6)
+  
+  #Check colinearlity
+  model_full <- glmer.nb(Cases ~ Mean_temp + Mean_rain + Mean_humidity + Mean_NDVI + Mean_wind + Mean_AOD + log(Mean_PopDensity) + offset(log(Total_Pop)) + (1 | NAME_2), data = district_monthly_epi_env_2023)
+  summary(model_full)
+  tab_model(model_full)
+  vif(model_full)
+  
+  
+  
+# Zero inflated negative binomial regression model
+
+library(pscl)
+zinb_model_1 <- zeroinfl(Cases ~ Mean_temp + Mean_humidity + Mean_wind + Mean_NDVI + log(Mean_PopDensity) | Mean_PopDensity + Total_Pop, 
+                       data = district_monthly_epi_env_2023, 
+                       dist = "negbin")
+summary(zinb_model_1)
+AIC(zinb_model) #AIC = 1454 LLR = -717.4
+
+zinb_model_2 <- zeroinfl(Cases ~ Mean_temp + Mean_wind + Mean_NDVI + Mean_PopDensity | Mean_PopDensity + Total_Pop, 
+                         data = district_monthly_epi_env_2023, 
+                         dist = "negbin")
+summary(zinb_model_2)
+AIC(zinb_model_2) #AIC = 1460 LLR = -721.1
+
+zinb_model_3 <- zeroinfl(Cases ~ Mean_temp + Mean_wind + Mean_NDVI + Mean_PopDensity | Mean_PopDensity, 
+                         data = district_monthly_epi_env_2023, 
+                         dist = "negbin")
+summary(zinb_model_3)
+AIC(zinb_model_3) #AIC =1458 LLR = -721.1
+
+zinb_model_4 <- zeroinfl(Cases ~ Mean_temp + Mean_wind  |  Mean_wind,
+                         data = district_monthly_epi_env_2023, 
+                         dist = "negbin")
+summary(zinb_model_4)
+plot(residuals(zinb_model_4))
+
+#Comparison of the Cambridge vs Molesworth Model
+
+#Annual Analyis
+Annual_env_epi_2023 <- district_monthly_epi_env %>%
+  filter(Year == 2023) %>%
+  rename(molesworth_risk_category = risk_category.x, cam_risk_category = risk_category.y) %>%
+  group_by(NAME_2, molesworth_risk_category, cam_risk_category) %>%
+  summarize(total_cases = sum(Cases, na.rm = TRUE),
+            Attack_Rate = sum(Cases, na.rm = TRUE) / sum(Total_Pop) * 100000,
+            .groups = 'drop')
+
+# Perform the Kruskal-Wallis test for Molesworth risk categories
+kruskal_test_molesworth <- kruskal.test(Attack_Rate ~ molesworth_risk_category, data = Annual_env_epi_2023)
+
+# View the results
+print(kruskal_test_molesworth)
+
+# Perform the Kruskal-Wallis test for Cambridge model risk categories
+kruskal_test_cambridge <- kruskal.test(Attack_Rate ~ cam_risk_category, data = Annual_env_epi_2023)
+
+# View the results
+print(kruskal_test_cambridge)
+
+
+#Just two categories
+
+head(Annual_env_epi_2023)     
+
+Annual_env_epi_2023 <- Annual_env_epi_2023 %>%
+  mutate(risk_category = case_when(
+    risk_category %in% c("Moderate Risk 0.4-0.6", "High Risk 0.6-0.8") ~ "Moderate and High Risk",
+    risk_category == "Low Risk <0.4" ~ "Low Risk",
+    TRUE ~ risk_category
+  ))
+
+shapiro.test(Annual_env_epi_2023$Attack_Rate[Annual_env_epi_2023$risk_category == "Low Risk"])
+shapiro.test(Annual_env_epi_2023$Attack_Rate[Annual_env_epi_2023$risk_category == "Moderate and High Risk"])
+
+wilcox.test(Attack_Rate ~ risk_category, data = Annual_env_epi_2023, subset = risk_category %in% c("Moderate and High Risk", "Low Risk"))
+
+#Cambridge Analysis
+
+Annual_env_epi_cam_2023 <- district_monthly_epi_env_2023 %>%
+  group_by(NAME_2, risk_category.y) %>%
+  summarize(total_cases = sum(Cases, na.rm = TRUE),
+            attack_rate = sum(Cases, na.rm = TRUE) / sum(Total_Pop) * 100000,
+            .groups = 'drop')
+
