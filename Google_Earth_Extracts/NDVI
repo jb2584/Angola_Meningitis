@@ -1,0 +1,87 @@
+// Define the time range
+var startYear = 2000;
+var endYear = 2023;
+
+// Load the uploaded shapefile for regions and districts
+var regions = ee.FeatureCollection('projects/angolaclimatemeningitis/assets/angola_regions_utf8');
+var districts = ee.FeatureCollection('projects/angolaclimatemeningitis/assets/angola_districts_utf8');
+
+// Define the CRS and scale
+var crs = 'EPSG:4326';
+var scale = 10000;
+
+// Function to calculate monthly mean NDVI
+var calculateMonthlyMeanNDVI = function(year, month, collection, property) {
+  var startDate = ee.Date.fromYMD(year, month, 1);
+  var endDate = startDate.advance(1, 'month');
+
+  // Filter the dataset for the specified month and area
+  var monthlyNDVI = ee.ImageCollection('MODIS/061/MOD13A2')
+                      .filterDate(startDate, endDate)
+                      .filterBounds(collection)
+                      .select('NDVI')
+                      .mean(); // Calculate the mean NDVI
+
+  // Check if the image has any bands
+  var bandNames = monthlyNDVI.bandNames();
+  var imageHasBands = bandNames.size().gt(0);
+
+  // If the image has no bands, skip this period
+  if (!imageHasBands.getInfo()) {
+    print('No data for', year, month);
+    return ee.FeatureCollection([]);
+  }
+
+  // Reproject to the defined CRS and scale, and clip to the boundary of the collection
+  monthlyNDVI = monthlyNDVI.reproject(crs, null, scale).clip(collection);
+
+  // Reduce the data by the collection and calculate mean NDVI
+  var stats = monthlyNDVI.reduceRegions({
+    collection: collection,
+    reducer: ee.Reducer.mean(),
+    scale: scale, // Ensure the scale is used correctly
+    crs: crs // Ensure the CRS is specified
+  });
+
+  // Add year and month information
+  stats = stats.map(function(feature) {
+    return feature.set('year', year)
+                  .set('month', month)
+                  .set('property', feature.get(property))
+                  .set('mean_ndvi', feature.get('mean'));
+  });
+
+  return stats;
+};
+
+// Initialize empty FeatureCollections to store results for all years
+var all_years_results_regions = ee.FeatureCollection([]);
+var all_years_results_districts = ee.FeatureCollection([]);
+
+// Loop through each year and collect data
+for (var year = startYear; year <= endYear; year++) {
+  for (var month = 1; month <= 12; month++) {
+    var monthlyStatsRegions = calculateMonthlyMeanNDVI(year, month, regions, 'NAME_1');
+    var monthlyStatsDistricts = calculateMonthlyMeanNDVI(year, month, districts, 'NAME_2');
+    all_years_results_regions = all_years_results_regions.merge(monthlyStatsRegions);
+    all_years_results_districts = all_years_results_districts.merge(monthlyStatsDistricts);
+  }
+}
+
+// Export the combined results as a single CSV file for regions
+Export.table.toDrive({
+  collection: all_years_results_regions,
+  description: 'Combined_Monthly_Mean_NDVI_Regions_Angola_2000_2023',
+  selectors: ['property', 'year', 'month', 'mean_ndvi'],
+  fileFormat: 'CSV',
+  folder: 'Angola_NDVI'
+});
+
+// Export the combined results as a single CSV file for districts
+Export.table.toDrive({
+  collection: all_years_results_districts,
+  description: 'Combined_Monthly_Mean_NDVI_Districts_Angola_2000_2023',
+  selectors: ['property', 'year', 'month', 'mean_ndvi'],
+  fileFormat: 'CSV',
+  folder: 'Angola_NDVI'
+});
