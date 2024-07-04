@@ -1,0 +1,277 @@
+########################### NVDI ###########################################
+
+ndvi_summary<-read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Land_Cover/NVDI_Data/mean_ndvi_summary.csv")
+ndvi_summary$Mean_NDVI <- ndvi_summary$Mean_NDVI*0.0001
+#Add NVDI to 2023 case data
+ndvi_2023 <- ndvi_summary %>%
+  filter(Year == 2023)
+
+district_case_data_2023 <- district_case_data_2023 %>%
+  left_join(ndvi_2023, by = c("NAME_2" = "District"))
+
+ggplot(data = district_case_data_2023) +
+  geom_sf(aes(fill = Mean_NDVI), color = "white", size = 0.1) +  
+  scale_fill_gradient(low = "white", high = "forestgreen", 
+                      name = "NDVI Index",
+                      limits = range(district_case_data_2023$Mean_NDVI, na.rm = TRUE),
+                      na.value = "grey50",  # Color for NA values
+                      guide = "colourbar") +
+  labs(title = "NDVI per District in Angola, 2023",
+       subtitle = "Normalized Difference Vegetation Index",
+       caption = "Data Source: NDVI Summary") +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+
+#Static 20 year change map
+
+avg_ndvi_20yr <- ndvi_summary %>%
+  filter(Year >= 2000 & Year <= 2020) %>% 
+  group_by(District) %>%
+  summarize(Avg_NDVI_20yr = mean(Mean_NDVI, na.rm = TRUE)) %>%
+  ungroup()
+
+angola_avg_ndvi_map <- angola_districts %>%
+  left_join(avg_ndvi_20yr, by = c("NAME_2" = "District"))
+
+ggplot(data = angola_avg_ndvi_map) +
+  geom_sf(aes(fill = Avg_NDVI_20yr), color = NA) +
+  scale_fill_gradient(low = "white", high = "darkgreen", name = "20-Year Avg NDVI") +
+  labs(title = "20-Year Average NDVI per District in Angola (2000-2020)") +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5)) 
+
+#5 year absolute average
+
+# Calculate the baseline NDVI (2004-2008)
+baseline_ndvi <- ndvi_summary %>%
+  filter(Year >= 2004 & Year <= 2008) %>%
+  group_by(District) %>%
+  summarize(Baseline_NDVI = mean(Mean_NDVI, na.rm = TRUE)) %>%
+  ungroup()
+
+# Calculate average NDVI for each 5-year period, already done by you in `avg_ndvi_5yr`
+
+# Calculate the baseline NDVI (2004-2008)
+baseline_ndvi <- ndvi_summary %>%
+  filter(Year >= 2004 & Year <= 2008) %>%
+  group_by(District) %>%
+  summarize(Baseline_NDVI = mean(Mean_NDVI, na.rm = TRUE)) %>%
+  ungroup()
+
+# Calculate average NDVI for each 5-year period with adjusted period classification
+avg_ndvi_5yr <- ndvi_summary %>%
+  mutate(Period = cut(Year, breaks = seq(2004, max(Year) + 1, by = 5), right = FALSE, labels = c("[2004,2008)", "[2009,2013)", "[2014,2018)", "[2019,2023)"))) %>%
+  group_by(District, Period) %>%
+  summarize(Avg_NDVI = mean(Mean_NDVI, na.rm = TRUE)) %>%
+  ungroup()
+
+# Merge baseline data with the calculated averages
+avg_ndvi_5yr <- avg_ndvi_5yr %>%
+  left_join(baseline_ndvi, by = "District")
+
+# Calculate percent change from baseline
+avg_ndvi_5yr <- avg_ndvi_5yr %>%
+  mutate(Percent_Change = ((Avg_NDVI - Baseline_NDVI) / Baseline_NDVI) * 100)
+
+# Join this data with the angola_districts spatial data
+angola_avg_ndvi_5yr_map <- angola_districts %>%
+  left_join(avg_ndvi_5yr, by = c("NAME_2" = "District")) %>%
+  filter(Period != "[2004,2008)") 
+
+# Ensure no NAs in Percent_Change and Period before plotting
+angola_avg_ndvi_5yr_map <- angola_avg_ndvi_5yr_map %>%
+  filter(!is.na(Percent_Change) & !is.na(Period))
+
+# Plot with ggplot2, ensuring only non-NA data is used
+ggplot(data = angola_avg_ndvi_5yr_map) +
+  geom_sf(aes(fill = Percent_Change), color = NA) +
+  scale_fill_gradient2(
+    low = "red", 
+    mid = "white", 
+    high = "forestgreen", 
+    midpoint = 0, 
+    name = "Percent Change in NDVI"
+  ) +
+  facet_wrap(~Period, ncol = 4) +  
+  labs(
+    title = "Percent Change in NDVI from Baseline (2004-2008) per District",
+    subtitle = "Faceted by 5-Year Periods, in Angola"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(size = 10),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+#Regional Data - 24 year average
+
+# Import the CSV file for regions
+monthly_ndvi_data_regions <- read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Land_Cover/NDVI_Data/Monthly/Combined_Monthly_Mean_NDVI_Regions_Angola_2000_2023.csv")
+head(monthly_ndvi_data_regions)
+# Calculate the 24-year average NDVI for each region
+avg_ndvi_regions <- monthly_ndvi_data_regions %>%
+  group_by(property) %>%
+  summarize(Twenty_Four_Year_Avg_NDVI = mean(mean_ndvi, na.rm = TRUE)/10000) %>%
+  ungroup()
+
+# Load the shapefile for regions
+angola_regions <- st_read("/path/to/your/angola_regions.shp")
+
+# Merge the average NDVI data with the spatial data
+angola_regions_ndvi <- angola_regions %>%
+  left_join(avg_ndvi_regions, by = c("NAME_1" = "property"))
+
+# Calculate the centroid coordinates for labeling
+angola_regions_ndvi <- angola_regions_ndvi %>%
+  mutate(centroid = st_centroid(geometry),
+         centroid_x = st_coordinates(centroid)[,1],
+         centroid_y = st_coordinates(centroid)[,2])
+
+# Plot the 24-year average NDVI on a map
+ggplot(data = angola_regions_ndvi) +
+  geom_sf(aes(fill = Twenty_Four_Year_Avg_NDVI), color = "lightgrey", size = 0.2) +
+  scale_fill_gradient(low = "white", high = "forestgreen", name = "Mean NDVI") +
+  geom_text_repel(
+    aes(x = centroid_x, y = centroid_y, label = NAME_1), 
+    size = 3, 
+    color = "black", 
+    fontface ="bold",
+    max.overlaps = 20,
+    point.padding = unit(0.5, "lines"), # Adjust padding if needed
+    segment.size = 0.5, 
+    segment.color = "black",
+    arrow = arrow(length = unit(0.01, "npc")),
+    force = 1,
+    nudge_x = 0,
+    nudge_y = 0
+  ) +
+  labs(
+    title = "24-Year Average NDVI by Region in Angola (2000-2023)",
+    x = "",
+    y = ""
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+#Monthly Analysis
+
+# Calculate the 24-year average monthly NDVI for each region
+avg_monthly_ndvi_regions <- monthly_ndvi_data_regions %>%
+  group_by(property, month) %>%
+  summarize(Avg_Monthly_NDVI = mean(mean_ndvi, na.rm = TRUE)) %>%
+  ungroup()
+
+# Create a factor for month to ensure correct order in the plot
+avg_monthly_ndvi_regions <- avg_monthly_ndvi_regions %>%
+  mutate(month = factor(month, levels = 1:12, labels = month.abb))
+
+# Order the regions by their average December NDVI
+regions_ordered <- avg_monthly_ndvi_regions %>%
+  filter(month == "Dec") %>%
+  arrange(desc(Avg_Monthly_NDVI)) %>%
+  pull(property)
+
+# Reorder the factor levels of 'property' based on the December average
+avg_monthly_ndvi_regions <- avg_monthly_ndvi_regions %>%
+  mutate(property = factor(property, levels = regions_ordered))
+
+# Plot the 24-year average monthly NDVI by region
+ggplot(avg_monthly_ndvi_regions, aes(x = month, y = Avg_Monthly_NDVI, color = property, group = property)) +
+  geom_line() +
+  labs(
+    title = "24-Year Average Monthly NDVI by Region in Angola (2000-2023)",
+    x = "Month",
+    y = "Mean Monthly NDVI",
+    color = "Region"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+#District 4 yearly change
+
+ndvi_summary <- read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Land_Cover/NVDI_Data/Monthly/Combined_Monthly_Mean_NDVI_Districts_Angola_2000_2023.csv")
+head
+
+# Calculate the 4-year average baseline for 2000-2003
+baseline_ndvi <- ndvi_summary %>%
+  filter(year >= 2000 & year <= 2003) %>%
+  group_by(property) %>%
+  summarize(Baseline_NDVI = mean(mean_ndvi, na.rm = TRUE)) %>%
+  ungroup()
+
+# Calculate the 4-year averages for each period
+avg_ndvi_4yr <- ndvi_summary %>%
+  mutate(
+    Period = cut(
+      year, 
+      breaks = seq(2000, max(year) + 1, by = 4), 
+      labels = c("2000-2003", "2004-2007", "2008-2011", "2012-2015", "2016-2019", "2020-2023"),
+      include.lowest = TRUE,
+      right = FALSE
+    )
+  ) %>%
+  group_by(property, Period) %>%
+  summarize(Avg_NDVI = mean(mean_ndvi, na.rm = TRUE), .groups = 'drop') 
+
+# Calculate the percentage change from the baseline
+avg_ndvi_4yr <- avg_ndvi_4yr %>%
+  left_join(baseline_ndvi, by = "property") %>%
+  mutate(Percent_Change = ((Avg_NDVI - Baseline_NDVI) / Baseline_NDVI) * 100)
+
+# Filter out the baseline period from the results
+avg_ndvi_4yr <- avg_ndvi_4yr %>%
+  filter(Period != "2000-2003") 
+
+# Join the NDVI data to the district shapefile
+angola_districts <- st_read("/path/to/your/angola_districts.shp")
+angola_avg_ndvi_4yr_map <- angola_districts %>%
+  left_join(avg_ndvi_4yr, by = c("NAME_2" = "property")) %>%
+  filter(!is.na(Percent_Change) & !is.na(Period))
+
+# Plot the percentage change map
+ggplot(data = angola_avg_ndvi_4yr_map) +
+  geom_sf(aes(fill = Percent_Change), color = NA) +
+  scale_fill_gradient2(
+    low = "red", 
+    mid = "white", 
+    high = "forestgreen", 
+    midpoint = 0, 
+    name = "Percent Change in NDVI"
+  ) +
+  facet_wrap(~ Period, nrow = 1) +  
+  labs(
+    title = "Percent Change in NDVI from Baseline (2000-2003) per District",
+    subtitle = "Faceted by 4-Year Periods, in Angola"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(size = 10),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    panel.grid.major = element_blank(),  
+    panel.grid.minor = element_blank()   
+  )
+
