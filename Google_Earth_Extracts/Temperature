@@ -2,40 +2,56 @@
 var startYear = 2000;
 var endYear = 2023;
 
-// Define the geographical region: Angola
-var angola = ee.FeatureCollection('USDOS/LSIB_SIMPLE/2017')
-  .filter(ee.Filter.eq('country_na', 'Angola'));
+// Load the uploaded shapefile for regions
+var regions = ee.FeatureCollection('projects/angolaclimatemeningitis/assets/angola_regions_utf8');
 
-// Define the function to calculate yearly mean temperature
-var calculateYearlyMeanTemp = function(year) {
-  var startDate = ee.Date.fromYMD(year, 1, 1);
-  var endDate = startDate.advance(1, 'year');
+// Function to calculate average daily precipitation aggregated to monthly
+var calculateMonthlyAvgDailyPrecip = function(year, month, collection, property) {
+  var startDate = ee.Date.fromYMD(year, month, 1);
+  var endDate = startDate.advance(1, 'month');
 
-  // Filter the dataset for the specified year and area
-  var yearlyTemperature = ee.ImageCollection('ECMWF/ERA5_LAND/HOURLY')
-                            .filterDate(startDate, endDate)
-                            .filterBounds(angola)
-                            .select('temperature_2m')
-                            .mean()  // Calculate the mean temperature
-                            .clip(angola);  // Clip to the boundary of Angola
+  // Filter the dataset for the specified month and area
+  var monthlyPrecipitation = ee.ImageCollection('UCSB-CHG/CHIRPS/DAILY')
+                               .filterDate(startDate, endDate)
+                               .filterBounds(collection)
+                               .select('precipitation')
+                               .mean()  // Calculate the mean daily precipitation
+                               .clip(collection);  // Clip to the boundary of the collection
 
-  // Add the image to the map with visualization parameters
-  var visParams = {min: 280, max: 300, palette: ['blue', 'green', 'yellow', 'red']};
-  Map.addLayer(yearlyTemperature, visParams, 'Mean 2m Temperature ' + year);
-  
-  // Export the image, specifying scale and region
-  Export.image.toDrive({
-    image: yearlyTemperature,
-    description: 'Yearly_Mean_Temperature_2m_' + year,
-    folder: 'Angola_Temperature',
-    fileNamePrefix: 'Mean_2m_Temp_' + year,
-    scale: 1000,
-    region: angola.geometry(),
-    fileFormat: 'GeoTIFF'
+  // Reduce the data by the collection and calculate mean precipitation
+  var stats = monthlyPrecipitation.reduceRegions({
+    collection: collection,
+    reducer: ee.Reducer.mean(),
+    scale: 5000 // Adjust the scale as needed
   });
+
+  // Add year and month information
+  stats = stats.map(function(feature) {
+    return feature.set('year', year)
+                  .set('month', month)
+                  .set('property', feature.get(property))
+                  .set('mean_daily_precipitation', feature.get('mean'));
+  });
+
+  return stats;
 };
 
-// Apply the function for each year from 2000 to 2023
+// Initialize an empty list to hold the results
+var results_regions = ee.FeatureCollection([]);
+
+// Loop through each year and month for regions
 for (var year = startYear; year <= endYear; year++) {
-  calculateYearlyMeanTemp(year);
+  for (var month = 1; month <= 12; month++) {
+    var monthlyStatsRegions = calculateMonthlyAvgDailyPrecip(year, month, regions, 'NAME_1');
+    results_regions = results_regions.merge(monthlyStatsRegions);
+  }
 }
+
+// Export the results as CSV files for regions
+Export.table.toDrive({
+  collection: results_regions,
+  description: 'Monthly_Avg_Daily_Precipitation_Regions_Angola_2000_2023',
+  selectors: ['property', 'year', 'month', 'mean_daily_precipitation'],
+  fileFormat: 'CSV',
+  folder: 'Angola_Precipitation'
+});
