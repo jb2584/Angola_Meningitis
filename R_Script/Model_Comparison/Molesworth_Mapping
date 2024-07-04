@@ -1,0 +1,190 @@
+## Molesworth vs Cliff ##
+
+library(ncdf4)
+library(dplyr)
+library(readr)
+
+# Define the file path for the NetCDF file
+file_path <- "/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Molesworth/Molesworth_District_Prob"
+
+# Open the NetCDF file
+nc_data <- nc_open(file_path)
+
+# Extract the 'probmen' variable
+prob_data <- ncvar_get(nc_data, "probmen")
+
+# Extract the dimensions to get the district IDs
+gid <- 0:(length(prob_data) - 1)  # Assuming 'gid' is simply the index
+
+# Close the NetCDF file
+nc_close(nc_data)
+
+# Create a data frame with gid and probabilities
+prob_df <- data.frame(gid = gid, probability = prob_data)
+
+# Write the data frame to a CSV file
+write.csv(prob_df, "/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Molesworth/probability_data.csv", row.names = FALSE)
+
+view(prob_df)
+head(prob_df)
+
+
+# Load the district names data from the previously created CSV
+district_df <- read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Molesworth/district_names_cleaned.csv")
+
+# Merge the district names with the probability data
+merged_df <- left_join(prob_df, district_df, by = "gid")
+
+# Save the merged data frame to a CSV file
+write.csv(merged_df, "/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Molesworth/merged_district_probability_data.csv", row.names = FALSE)
+
+# Print the first few rows to verify
+view(merged_df)
+
+merged_df$district_name <- gsub("loca$", "", merged_df$district_name)
+merged_df <- merged_df %>%
+  mutate(district_name = gsub("G$", "", district_name))
+merged_df <- merged_df %>%
+  mutate(district_name = gsub("st$", "", district_name))
+merged_df <- merged_df %>%
+  mutate(district_name = gsub("sa$", "", district_name))
+
+name_changes <- c(
+  "Caimbambo" = "Caiambambo",
+  "Buco-Zauto" = "Buco Zau",
+  "nankover" = "nacover",
+  "Golungo Altoar" = "Golungo Alto",
+  "Pango Aluquemu" = "Pango Aluquém",
+  "Samba Caju" = "Samba Cajú",
+  "EboXR" = "Ebo",
+  "Porto Amboimeg" = "Porto Amboim",
+  "Waku Kungu" = "Waku Kungo",
+  "Caala" = "Caála",
+  "Katchiungo" = "Catchiungo",
+  "Londuimbali" = "Londuimbale",
+  "Longojo" = "Longonjo",
+  "Tchikala-Tcholo." = "Tchicala-Tcholoanga",
+  "Capenda Camulemb" = "Capenda",
+  "Xa-Muteba" = "Xá Muteba",
+  "AODala" = "Dala",
+  "Kunda Dia-Bazeu" = "Cunda-dia-Baza",
+  "Alto Zambezekhd" = "Alto Zambeze",
+  "LeuaR" = "Léua",
+  "Lumbala N'Guimbo" = "Lumbala-Nguimbo",
+  "Tombua" = "Tombwa",
+  "PuriR" = "Puri",
+  "Uige" = "Uíge",
+  "M'Banza Congobo" = "M'Banza Congo",
+  "SoyoR" = "Soyo"
+)
+
+# Update district names based on the manual changes
+merged_df <- merged_df %>%
+  mutate(district_name = recode(district_name, !!!name_changes))
+
+
+angola_districts_merged <- angola_districts %>%
+  left_join(merged_df, by = c("NAME_2" = "district_name"))
+
+
+# Save the merged spatial data to a new shapefile
+st_write(angola_districts_merged, "/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Molesworth/district_probability_data.shp")
+
+# Optionally, plot the result to verify
+plot(angola_districts_merged["probability"])
+view(angola_districts_merged)
+
+# Calculate centroids for each district
+angola_districts_merged <- angola_districts_merged %>%
+  mutate(centroid = st_centroid(geometry))
+
+view(angola_districts_merged)
+
+# Split the data into districts with and without probabilities
+districts_with_prob <- angola_districts_merged %>% filter(!is.na(probability))
+districts_without_prob <- angola_districts_merged %>% filter(is.na(probability))
+
+# Function to find the nearest district with a probability
+find_nearest_probability <- function(geom) {
+  distances <- st_distance(geom, districts_with_prob$centroid)
+  nearest_index <- which.min(distances)
+  return(districts_with_prob$probability[nearest_index])
+}
+
+# Apply the function to districts without probabilities
+districts_without_prob <- districts_without_prob %>%
+  rowwise() %>%
+  mutate(probability = find_nearest_probability(centroid))
+
+# Count the number of NAs that have been replaced
+num_replaced <- nrow(districts_without_prob)
+
+# Combine the datasets back together
+angola_districts_filled <- bind_rows(districts_with_prob, districts_without_prob)
+view(angola_districts_filled)
+
+# Remove the centroid column
+angola_districts_filled <- angola_districts_filled %>% st_drop_geometry() %>% select(-centroid)
+
+# Save the merged spatial data to a new shapefile
+st_write(st_as_sf(angola_districts_filled), "/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Molesworth/angola_districts_filled.shp")
+
+# Print the number of NAs that have been replaced
+print(paste("Number of NAs replaced:", num_replaced))
+
+# Define risk categories with ordered factors
+angola_districts_filled <- angola_districts_filled %>%
+  mutate(risk_category = case_when(
+    probability < 0.4 ~ "Low <0.4",
+    probability < 0.6 ~ "Moderate <0.6",
+    probability < 0.8 ~ "High <0.8",
+    probability >= 0.8 ~ "Very High ≥1.0"
+  ))
+
+# Ensure risk categories are ordered
+angola_districts_filled$risk_category <- factor(
+  angola_districts_filled$risk_category, 
+  levels = c("Very High ≥1.0", "High <0.8", "Moderate <0.6", "Low <0.4")
+)
+
+# Define color palette for risk categories
+risk_colors <- c("Low <0.4" = "white", "Moderate <0.6" = "orange", "High <0.8" = "red", "Very High >1.0" = "darkred")
+
+# Create ggplot with risk categories and ordered legend
+ggplot() +
+  geom_sf(data = angola_districts_filled, aes(fill = risk_category)) +
+  scale_fill_manual(values = risk_colors, name = "Risk Category") +
+  theme_minimal() +
+  labs(title = "Probability of Meningitis Epidemic in Angolan Districts",
+       subtitle = "",
+       caption = paste("")) +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    plot.subtitle = element_text(size = 12),
+    legend.position = "right",
+    panel.grid.major = element_blank(),  
+    panel.grid.minor = element_blank(),  
+    axis.title.x = element_blank(),      
+    axis.title.y = element_blank(),      
+    axis.text.x = element_blank(),       
+    axis.text.y = element_blank(),       
+    axis.ticks = element_blank()         
+  )
+
+risk_counts <- angola_districts_filled %>%
+  group_by(risk_category) %>%
+  summarize(count = n())
+
+# Print the counts
+print(risk_counts)
+
+angola_districts_filled_df <- st_drop_geometry(angola_districts_filled)
+
+# Inspect column names to ensure they are correct
+colnames(angola_districts_filled_df)
+
+# Select the desired columns
+angola_districts_filled_table <- angola_districts_filled_df[, c("NAME_1", "NAME_2", "probability", "risk_category")]
+
+# Save the resulting data to a CSV file
+write_csv(angola_districts_filled_table, "/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Molesworth/angola_districts_molesworth.csv")
