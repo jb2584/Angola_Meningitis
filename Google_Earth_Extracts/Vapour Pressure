@@ -1,0 +1,83 @@
+// Define the country boundary.
+var angola = ee.FeatureCollection('USDOS/LSIB_SIMPLE/2017')
+  .filter(ee.Filter.eq('country_co', 'AO'));
+
+// Load the TerraClimate dataset and select vapor pressure ('vp').
+var dataset = ee.ImageCollection('IDAHO_EPSCOR/TERRACLIMATE')
+  .filterDate('1990-01-01', '2023-12-31')
+  .select('vap');
+
+// Mask the dataset with the Angola boundary.
+var vpAngola = dataset.map(function(image) {
+  return image.clip(angola);
+});
+
+// Load the uploaded shapefiles for regions and districts
+var regions = ee.FeatureCollection('projects/angolaclimatemeningitis/assets/angola_regions_utf8');
+var districts = ee.FeatureCollection('projects/angolaclimatemeningitis/assets/angola_districts_utf8');
+
+// Function to calculate monthly mean vapor pressure
+var calculateMonthlyMeanVP = function(year, month, collection, property) {
+  var startDate = ee.Date.fromYMD(year, month, 1);
+  var endDate = startDate.advance(1, 'month');
+
+  // Filter the dataset for the specified month and area
+  var monthlyVP = vpAngola
+    .filterDate(startDate, endDate)
+    .mean()  // Calculate the mean vapor pressure
+    .clip(collection);  // Clip to the boundary of the collection
+
+  // Reduce the data by the collection and calculate mean vapor pressure
+  var stats = monthlyVP.reduceRegions({
+    collection: collection,
+    reducer: ee.Reducer.mean(),
+    scale: 10000 // Adjust the scale as needed
+  });
+
+  // Add year and month information
+  stats = stats.map(function(feature) {
+    return feature.set('year', year)
+                  .set('month', month)
+                  .set('property', feature.get(property))
+                  .set('mean_vapor_pressure', feature.get('mean'));
+  });
+
+  return stats;
+};
+
+// Initialize an empty list to hold the results
+var results_regions = ee.FeatureCollection([]);
+var results_districts = ee.FeatureCollection([]);
+
+// Define the time range
+var startYear = 2000;
+var endYear = 2023;
+
+// Loop through each year and month for regions and districts
+for (var year = startYear; year <= endYear; year++) {
+  for (var month = 1; month <= 12; month++) {
+    var monthlyStatsRegions = calculateMonthlyMeanVP(year, month, regions, 'NAME_1');
+    var monthlyStatsDistricts = calculateMonthlyMeanVP(year, month, districts, 'NAME_2');
+    results_regions = results_regions.merge(monthlyStatsRegions);
+    results_districts = results_districts.merge(monthlyStatsDistricts);
+  }
+}
+
+// Export the results as CSV files for regions
+Export.table.toDrive({
+  collection: results_regions,
+  description: 'Monthly_Mean_Vapor_Pressure_Regions_Angola_2000_2023',
+  selectors: ['property', 'year', 'month', 'mean_vapor_pressure'],
+  fileFormat: 'CSV',
+  folder: 'Angola_Vapor_Pressure'
+});
+
+// Export the results as CSV files for districts
+Export.table.toDrive({
+  collection: results_districts,
+  description: 'Monthly_Mean_Vapor_Pressure_Districts_Angola_2000_2023',
+  selectors: ['property', 'year', 'month', 'mean_vapor_pressure'],
+  fileFormat: 'CSV',
+  folder: 'Angola_Vapor_Pressure'
+});
+
