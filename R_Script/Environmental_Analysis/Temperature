@@ -1,0 +1,357 @@
+library(moments)
+library(dplyr)
+library(ggplot2)
+library(sf)
+library(ggrepel)
+library(readr)
+
+########################### TEMPERATURE DATA ###################################
+
+temperature_summary_regional <- data.frame(Region = character(), Year = integer(), Mean_Temp = numeric())
+
+temperature_summary<-read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Temperature/Angola_Temperature/YearlyTemp_perDistrict.csv")
+
+#Annual Trend Analysis
+# 2023
+temp_2023 <- temperature_summary %>%
+  filter(Year == 2023)
+
+district_case_data_2023$Mean_Temp <- temp_2023$Mean_Temp-273.15
+
+ggplot(data = district_case_data_2023) +
+  geom_sf(aes(fill = Mean_Temp), color = "white", size = 0.5) +
+  scale_fill_gradient(low = "yellow", high = "red", name = "Avg Temp (°C)") +
+  labs(
+    title = "Average Temperature per District in Angola (2023)",
+    subtitle = "Mean Hourly Air Temperature at 2m"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    plot.title = element_text(size = 14, face = "bold"),
+    plot.subtitle = element_text(size = 12),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank()
+  )
+
+#4 Year Trend - District
+baseline_years <- 2000:2003
+baseline_df <- temperature_summary %>%
+  filter(Year %in% baseline_years) %>%
+  group_by(District) %>%
+  summarize(baseline_avg = mean(Mean_Temp, na.rm = TRUE))
+
+# Calculate averages for each four-year period
+four_year_periods <- seq(2000, 2023, by = 4)
+period_averages <- list()
+
+for (start_year in four_year_periods) {
+  end_year <- start_year + 3
+  period_df <- temperature_summary %>%
+    filter(Year >= start_year & Year <= end_year) %>%
+    group_by(District) %>%
+    summarize(period_avg = mean(Mean_Temp, na.rm = TRUE), .groups = 'drop') %>%
+    mutate(period = paste(start_year, end_year, sep = "-"))
+  
+  period_averages[[paste(start_year, end_year)]] <- period_df
+}
+
+# Combine period averages into one dataframe
+period_avg_df <- do.call(rbind, period_averages) %>%
+  left_join(baseline_df, by = "District")
+
+# Calculate the percentage change from the baseline
+period_avg_df$Change <- (period_avg_df$period_avg - period_avg_df$baseline_avg)
+
+# Exclude baseline period from the final plot dataset
+period_avg_df <- period_avg_df %>%
+  filter(!period %in% paste(baseline_years[1], baseline_years[length(baseline_years)], sep = "-"))
+
+# Join to spatial data for mapping
+angola_districts_temp <- angola_districts %>%
+  left_join(period_avg_df, by = c("NAME_2" = "District"))
+
+# Plotting the change
+ggplot(data = angola_districts_temp) +
+  geom_sf(aes(fill = Change), color = NA) +
+  scale_fill_gradient2(
+    low = "blue", high = "red", mid = "white", midpoint = 0,
+    name = "Change in Temp (°C)"
+  ) +
+  facet_wrap(~ period, nrow = 1) +
+  labs(
+    title = "Change in Temperature Relative to Baseline (2000-2003)",
+    subtitle = "District average air temperature at 2m over 4-year Periods",
+    caption = ""
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    strip.text.x = element_text(size = 10, angle = 0, hjust = 0.5),
+    panel.spacing = unit(1, "lines"),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+#4 Year Trend - Regional
+
+temperature_summary_regional<-read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Temperature/Angola_Temperature/YearlyTemp_perRegion.csv")
+
+baseline_df <- temperature_summary_regional %>%
+  filter(Year >= 2000 & Year <= 2003) %>%
+  group_by(Region) %>%
+  summarize(baseline_avg = mean(Mean_Temp, na.rm = TRUE))
+
+# Create a new column for four-year periods starting from 2000
+temperature_summary_regional <- temperature_summary_regional %>%
+  filter(Year >= 2000) %>%
+  mutate(Period = cut(Year, breaks = c(seq(2000, 2020, by = 4), 2023), right = FALSE, labels = FALSE))
+
+# Group by Region and Period, then calculate the mean temperature for each group
+four_year_avg_temp <- temperature_summary_regional %>%
+  group_by(Region, Period) %>%
+  summarize(Mean_Temp = mean(Mean_Temp, na.rm = TRUE), .groups = 'drop')
+
+# Optional: Create a more descriptive period label
+four_year_avg_temp <- four_year_avg_temp %>%
+  mutate(Period_Label = paste0((Period - 1) * 4 + 2000, "-", (Period - 1) * 4 + 2003))
+
+# Join with the baseline data to calculate the change
+four_year_avg_temp <- four_year_avg_temp %>%
+  left_join(baseline_df, by = "Region") %>%
+  mutate(Change = Mean_Temp - baseline_avg)
+
+# Filter out NA periods
+four_year_avg_temp <- four_year_avg_temp %>%
+  filter(!is.na(Period))
+
+# Arrange the data for better readability
+four_year_avg_temp <- four_year_avg_temp %>%
+  arrange(Region, Period)
+
+# Print the result
+print(four_year_avg_temp)
+temperature_summary_regional <- temperature_summary_regional %>%
+  mutate(Mean_Temp_Celsius = Mean_Temp - 273.15)
+
+regions_ordered <- temperature_summary_regional %>%
+  filter(Year == 2023) %>%
+  arrange(desc(Mean_Temp_Celsius)) %>%
+  pull(Region)
+
+temperature_summary_regional <- temperature_summary_regional %>%
+  mutate(Region = factor(Region, levels = regions_ordered))
+
+ggplot(temperature_summary_regional, aes(x = Year, y = Mean_Temp_Celsius, group = Region, color = Region)) +
+  geom_line() +
+  labs(
+    title = "",
+    x = "Year",
+    y = "Mean Temp (°C)"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+print(temperature_summary_regional)
+
+#24 year summary
+twenty_year_avg_temp <- temperature_summary_regional %>%
+  filter(Year >= 2000 & Year <= 2023) %>%
+  group_by(Region) %>%
+  summarize(Twenty_Year_Avg_Temp = mean(Mean_Temp_Celsius, na.rm = TRUE))
+
+# Load the spatial data for Angola regions
+angola_regions <- st_read("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Shape_File/Region")
+
+# Merge the temperature data with the spatial data
+angola_regions_temp <- angola_regions %>%
+  left_join(twenty_year_avg_temp, by = c("NAME_1" = "Region"))
+
+# Create centroids for the labels
+angola_regions_temp <- angola_regions_temp %>%
+  mutate(centroid = st_centroid(geometry))
+
+# Extract coordinates for the centroids
+centroids <- st_coordinates(angola_regions_temp$centroid)
+
+angola_regions_temp <- angola_regions_temp %>%
+  mutate(centroid_x = centroids[, 1], centroid_y = centroids[, 2])
+
+# Create a labeled map of Angola with 20-year average temperatures per region
+ggplot(data = angola_regions_temp) +
+  geom_sf(aes(fill = Twenty_Year_Avg_Temp), color = "lightgrey", size = 0.2) +
+  scale_fill_gradient(low = "white", high = "red", name = "Mean Temp (°C)") +
+  geom_text_repel(
+    aes(x = centroid_x, y = centroid_y, label = NAME_1), 
+    size = 3, 
+    color = "black", 
+    fontface ="bold",
+    max.overlaps = 20,
+    point.padding = unit(0.5, "lines"), 
+    segment.size = 0.5, 
+    segment.color = "black",
+    arrow = arrow(length = unit(0.01, "npc")),
+    force = 1,
+    nudge_x = 0,
+    nudge_y = 0
+  ) +
+  labs(
+    title = "20-Year Average Temperature by Region in Angola (2000-2023)",
+    x = "",
+    y = ""
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+
+#Weekly Data
+
+weekly_temp<- read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Temperature/Weekly_Data/Weekly_Temp.csv")
+
+weekly_temp_long <- weekly_temp %>%
+  pivot_longer(cols = starts_with("Week"), names_to = "Week", values_to = "Temp") %>%
+  mutate(Week = as.integer(sub("Week", "", Week)))  
+
+district_case_data_2023_weekly <- full_epi_data %>%
+  mutate(Week = as.integer(Week),
+         Year = as.integer(Year))
+
+district_case_data_2023_weekly <- district_case_data_2023_weekly %>%
+  left_join(weekly_temp_long %>% select(District, Week, Temp), by = c("NAME_2" = "District", "Week" = "Week"))
+
+district_case_data_2023_weekly$Temp <- (district_case_data_2023_weekly$Temp - 273.15)
+
+weekly_temp_summary <- district_case_data_2023_weekly %>%
+  group_by(Week) %>%
+  summarize(Total_Cases = sum(Cases, na.rm = TRUE),
+            Mean_Temp= mean(Temp, na.rm = TRUE))
+
+
+temp_scale_factor <- max(weekly_temp_summary$Total_Cases) / (max(weekly_temp_summary$Mean_Temp))
+
+ggplot(data = angola_regions_temp) +
+  geom_sf(aes(fill = Twenty_Year_Avg_Temp), color = "black", size = 0.2) +
+  scale_fill_gradient(low = "blue", high = "red", name = "20-Year Avg Temp (°C)") +
+  geom_segment(
+    aes(x = centroid_x, y = centroid_y, xend = label_x, yend = label_y), 
+    color = "black", 
+    size = 0.2,
+    arrow = arrow(length = unit(0.01, "npc"))
+  ) +
+  geom_label_repel(
+    aes(x = label_x, y = label_y, label = NAME_1), 
+    size = 3, 
+    color = "black", 
+    max.overlaps = 100,
+    segment.size = 0.5, 
+    segment.color = "black",
+    arrow = arrow(length = unit(0.01, "npc"))
+  ) +
+  labs(
+    title = "20-Year Average Temperature by Region in Angola (2000-2020)",
+    x = "",
+    y = ""
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+#Seasonal Analysis - Monthly 
+
+# Import the CSV file with UTF-8 encoding
+monthly_temp_data_regions <- read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Temperature/Monthly_Data/Monthly_Mean_Temperature_Regions_Angola_2000_2023.csv")
+
+# Calculate 24-year average monthly temperature in Celsius
+avg_monthly_temp_regions <- monthly_temp_data_regions %>%
+  mutate(mean_temperature_celsius = mean_temperature - 273.15) %>%
+  group_by(property, month) %>%
+  summarize(Avg_Monthly_Temp_Celsius = mean(mean_temperature_celsius, na.rm = TRUE)) %>%
+  ungroup()
+
+# Create a factor for month to ensure correct order in the plot
+avg_monthly_temp_regions <- avg_monthly_temp_regions %>%
+  mutate(month = factor(month, levels = 1:12, labels = month.abb))
+
+# Order the regions by their average December temperature
+regions_ordered <- avg_monthly_temp_regions %>%
+  filter(month == "Dec") %>%
+  arrange(desc(Avg_Monthly_Temp_Celsius)) %>%
+  pull(property)
+
+# Reorder the factor levels of 'property' based on the December average
+avg_monthly_temp_regions <- avg_monthly_temp_regions %>%
+  mutate(property = factor(property, levels = regions_ordered))
+
+# Plot the 24-year average monthly temperature by region in Celsius
+ggplot(avg_monthly_temp_regions, aes(x = month, y = Avg_Monthly_Temp_Celsius, color = property, group = property)) +
+  geom_line() +
+  labs(
+    title = "24-Year Average Monthly Temperature by Region in Angola (2000-2023)",
+    x = "Month",
+    y = "Mean Monthly Temp (°C)",
+    color = "Region"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+#Whole Country District Level Average
+district_monthly_temp <-read.csv("/Users/jamesbevan/Documents/1_Medicine & Public Health/Cambridge/MPhil Population Health/Dissertation/3. Data/Temperature/Monthly_Data/Monthly_Mean_Temperature_Districts_Angola_2000_2023.csv")
+
+# Prepare the data for regression analysis
+district_monthly_temp <- district_monthly_temp %>%
+  mutate(mean_temperature_celsius = mean_temperature - 273.15,
+         date = as.Date(paste(year, month, "01", sep = "-"), format = "%Y-%m-%d"))
+
+# Calculate the district average temperatures
+# Convert mean_temperature to Celsius and create a date column
+district_monthly_temp <- district_monthly_temp %>%
+  mutate(mean_temperature_celsius = mean_temperature - 273.15,
+         date = as.Date(paste(year, month, "01", sep = "-"), format = "%Y-%m-%d"))
+
+# Perform linear regression
+district_avg_temp <- district_monthly_temp %>%
+  group_by(date) %>%
+  summarize(mean_temp_celsius = mean(mean_temperature_celsius, na.rm = TRUE))
+
+hist(district_avg_temp$mean_temp_celsius)
+qqnorm(residuals(model))
+qqline(residuals(model), col = "blue")
+cat("Kurtosis:", moments::kurtosis(residuals(model)), "\n")
+cat("Skewness:", moments::skewness(residuals(model)), "\n")
+
+# Extract the results
+model <- lm(mean_temp_celsius ~ date, data = district_avg_temp)
+summary(model)
+
+# Extract coefficients and calculate 24-year difference
+coefficient <- summary(model)$coefficients[2, 1] # Extract the slope (date coefficient)
+conf_int <- confint(model)[2, ] # Extract confidence interval for the slope
+
+# Number of days in 24 years (approximately)
+days_24_years <- 24 * 365.25
+
+# Calculate 24-year difference
+estimate_24yr <- coefficient * days_24_years
+conf_low_24yr <- conf_int[1] * days_24_years
+conf_high_24yr <- conf_int[2] * days_24_years
+
+# Print results
+cat("24-year estimated temperature change:", estimate_24yr, "°C\n")
+cat("95% Confidence Interval: [", conf_low_24yr, ",", conf_high_24yr, "] °C\n")
