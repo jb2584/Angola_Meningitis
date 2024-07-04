@@ -16,7 +16,7 @@
     #Plot district map
       ggplot(data = angola_shape_district) +
         geom_sf(color = "black", fill = "lightgray", size = 0.25) +  # Uniform fill color, black borders
-        geom_sf_text(aes(label = NAME_2), check_overlap = TRUE, size = 3, color = "black") +  # Label districts
+        geom_sf_text(aes(label = NAME_2), check_overlap = TRUE, size = 3, color = "black") +  
         labs(title = "Map of Angola", subtitle = "Districts of Angola") +
         theme_minimal() +
         theme(legend.position = "none")
@@ -28,9 +28,9 @@
       angola_regions <- st_transform(angola_shape_region, crs = 4326) #4326 is required becausue longitude and latitude 
       region_centroids <- st_centroid(angola_regions)
       region_centroids_df <- data.frame(
-        x = st_coordinates(region_centroids)[, 1],  # Longitude
-        y = st_coordinates(region_centroids)[, 2],  # Latitude
-        NAME_1 = angola_regions$NAME_1  # Make sure this matches the region names
+        x = st_coordinates(region_centroids)[, 1], 
+        y = st_coordinates(region_centroids)[, 2],  
+        NAME_1 = angola_regions$NAME_1  
       )
       
       #Plot region map
